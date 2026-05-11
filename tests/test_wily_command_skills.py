@@ -51,6 +51,8 @@ class WilyCommandSkillsTest(unittest.TestCase):
 
     def test_plugin_default_prompts_use_command_entrypoints(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["name"], "wily-roadmap")
+        self.assertEqual(manifest["interface"]["displayName"], "Wily Roadmap")
         prompts = manifest["interface"]["defaultPrompt"]
         joined = "\n".join(prompts)
         self.assertIn("$wily-init", joined)

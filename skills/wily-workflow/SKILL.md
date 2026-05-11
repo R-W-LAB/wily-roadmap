@@ -2,10 +2,10 @@
 name: wily-workflow
 description: Use when the user wants Wily's personal Codex workflow for software work: initialize or inspect per-repo .wily state, turn a large goal into dependency-aware roadmap phases, choose the next safe phase, execute a phase through an auditable session, revise future roadmap work, summarize progress, or keep remote/destructive actions approval-first.
 metadata:
-  short-description: Wily roadmap workflow for Codex
+  short-description: Wily Roadmap workflow for Codex
 ---
 
-# Wily Workflow
+# Wily Roadmap
 
 ## Purpose
 

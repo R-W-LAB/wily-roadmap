@@ -1,5 +1,5 @@
 {
-  "name": "wilyplugin",
+  "name": "wily-roadmap",
   "version": "0.1.0",
   "description": "Personal Codex workflow plugin for Wily roadmap, phase, and session management.",
   "author": {
@@ -7,8 +7,8 @@
     "email": "",
     "url": ""
   },
-  "homepage": "",
-  "repository": "",
+  "homepage": "https://github.com/airmang/wily-roadmap",
+  "repository": "https://github.com/airmang/wily-roadmap",
   "license": "UNLICENSED",
   "keywords": [
     "codex",
@@ -18,7 +18,7 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Wily Workflow",
+    "displayName": "Wily Roadmap",
     "shortDescription": "Manage large Codex projects with Wily roadmaps and phases.",
     "longDescription": "A personal Codex workflow plugin for local-first project roadmaps: initialize per-repo .wily state, split large goals into dependency-aware phases, execute phases through auditable sessions, revise future work without rewriting completed history, and require approval for remote or destructive actions.",
     "developerName": "Wily Castle",

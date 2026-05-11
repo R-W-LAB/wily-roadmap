@@ -2,7 +2,7 @@
 
 ## Scope
 
-This file governs `/Users/wilycastle/Code/projects/wilyplugin`.
+This file governs `/Users/wilycastle/Code/projects/wily-roadmap`.
 
 ## Project Intent
 
