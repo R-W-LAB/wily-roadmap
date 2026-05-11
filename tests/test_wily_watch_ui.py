@@ -14,6 +14,49 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import wily_watch_ui
 
 
+def _write_roadmap(project: Path, body: str) -> None:
+    state = project / ".wily"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "roadmap.yaml").write_text(body, encoding="utf-8")
+
+
+class LoadTest(unittest.TestCase):
+    def test_load_none_without_wily_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            view = wily_watch_ui._load(Path(tmp))
+            self.assertIsNone(view.roadmap)
+            self.assertFalse(view.has_state)
+
+    def test_load_none_roadmap_when_state_exists_without_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".wily").mkdir()
+            view = wily_watch_ui._load(Path(tmp))
+            self.assertTrue(view.has_state)
+            self.assertIsNone(view.roadmap)
+
+    def test_load_parses_phases_and_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_roadmap(Path(tmp), "\n".join([
+                'roadmap_version: 2',
+                'phases:',
+                '  - id: "01"',
+                '    title: "A"',
+                '    status: "done"',
+                '    depends_on: []',
+                '  - id: "02"',
+                '    title: "B"',
+                '    status: "pending"',
+                '    depends_on: ["01"]',
+            ]))
+            view = wily_watch_ui._load(Path(tmp))
+            self.assertEqual(view.version, 2)
+            self.assertEqual(len(view.phases), 2)
+            self.assertEqual(view.done, 1)
+            self.assertEqual(view.total, 2)
+            self.assertEqual({str(p["id"]) for p in view.ready}, {"02"})
+            self.assertEqual(set(view.by_id), {"01", "02"})
+
+
 class TruncateAndEmitTest(unittest.TestCase):
     def test_truncate_keeps_short_text(self) -> None:
         self.assertEqual(wily_watch_ui._truncate("abc", 10), "abc")

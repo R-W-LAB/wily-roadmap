@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,51 @@ RAIL_ASCII = {
 CHROME_ROWS = 5
 MIN_WIDTH_ONELINE = 24
 MIN_WIDTH_RAIL = 28
+
+
+@dataclass
+class _RoadmapView:
+    root: Path
+    has_state: bool
+    roadmap: dict[str, Any] | None
+    phases: list[Phase] = field(default_factory=list)
+    ready: list[Phase] = field(default_factory=list)
+    by_id: dict[str, Phase] = field(default_factory=dict)
+
+    @property
+    def version(self) -> Any:
+        return (self.roadmap or {}).get("roadmap_version", "unknown")
+
+    @property
+    def ready_ids(self) -> set[str]:
+        return {str(phase.get("id", "?")) for phase in self.ready}
+
+    @property
+    def total(self) -> int:
+        return len(self.phases)
+
+    @property
+    def done(self) -> int:
+        return sum(1 for phase in self.phases if phase.get("status") == "done")
+
+
+def _load(root: Path) -> _RoadmapView:
+    state_dir = root / ".wily"
+    roadmap_path = state_dir / "roadmap.yaml"
+    if not roadmap_path.exists():
+        return _RoadmapView(root=root, has_state=state_dir.exists(), roadmap=None)
+
+    roadmap = wily_state_summary.parse_roadmap(wily_state_summary.read_text(roadmap_path))
+    phases = roadmap.get("phases") or []
+    ready = wily_state_summary.executable_phases(phases)
+    return _RoadmapView(
+        root=root,
+        has_state=True,
+        roadmap=roadmap,
+        phases=phases,
+        ready=ready,
+        by_id=_phase_index(phases),
+    )
 
 
 def _truncate(text: str, limit: int) -> str:
