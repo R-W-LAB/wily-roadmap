@@ -1,0 +1,37 @@
+{
+  "name": "wilyplugin",
+  "version": "0.1.0",
+  "description": "Personal Codex workflow plugin for Wily roadmap, phase, and session management.",
+  "author": {
+    "name": "Wily Castle",
+    "email": "",
+    "url": ""
+  },
+  "homepage": "",
+  "repository": "",
+  "license": "UNLICENSED",
+  "keywords": [
+    "codex",
+    "workflow",
+    "planning",
+    "orchestration"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Wily Workflow",
+    "shortDescription": "Manage large Codex projects with Wily roadmaps and phases.",
+    "longDescription": "A personal Codex workflow plugin for local-first project roadmaps: initialize per-repo .wily state, split large goals into dependency-aware phases, execute phases through auditable sessions, revise future work without rewriting completed history, and require approval for remote or destructive actions.",
+    "developerName": "Wily Castle",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Wily Workflow for this repo task.",
+      "Plan this as Wily roadmap phases.",
+      "Summarize current workflow state."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
