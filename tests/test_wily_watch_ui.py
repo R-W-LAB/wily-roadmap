@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import wily_watch_ui
+
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _write_roadmap(project: Path, body: str) -> None:
@@ -192,6 +195,24 @@ class NodeLineTest(unittest.TestCase):
         self.assertTrue(text.startswith(" +--o 04-1  Improve init roadmap authoring"))
         self.assertIn("needs 03", text)
 
+    def test_node_line_rich_path_pending_shows_unmet_deps_label(self) -> None:
+        phases = self._phases()
+        by_id = wily_watch_ui._phase_index(phases)
+        by_id["03"]["status"] = "pending"
+
+        line = wily_watch_ui._node_line(
+            by_id["04-1"],
+            set(),
+            by_id,
+            prefix=" ├──",
+            id_width=4,
+            width=80,
+            ascii_=False,
+        )
+        text = "".join(span for span, _style in line)
+
+        self.assertIn("needs 03", text)
+
     def test_node_line_truncates_to_width(self) -> None:
         phases = self._phases()
         by_id = wily_watch_ui._phase_index(phases)
@@ -286,6 +307,12 @@ class GraphTest(unittest.TestCase):
         self.assertIn(" v", rendered)
         self.assertTrue(any(line.lstrip().startswith("o 05") and "deps 04-1 04-2" in line for line in rendered))
 
+    def test_graph_lines_rich_path_fan_uses_deps_label(self) -> None:
+        lines = wily_watch_ui._graph_lines(self.fan, set(), width=70, ascii_=False)
+        rendered = ["".join(span for span, _style in line).rstrip() for line in lines]
+
+        self.assertTrue(any("deps 04-1 04-2" in line for line in rendered))
+
     def test_graph_lines_initial_fan_in_uses_branch_and_merge(self) -> None:
         self.assertTrue(wily_watch_ui._pipeline_renderable(self.initial_fan_in))
 
@@ -336,3 +363,117 @@ class CollapseTest(unittest.TestCase):
         rendered = ["".join(span for span, _style in line).rstrip() for line in c_lines]
         self.assertTrue(rendered[0].lstrip().startswith("* 3 phases done"))
         self.assertTrue(any(line.startswith(" Stage 4 ") for line in rendered))
+
+
+class RenderWatchTest(unittest.TestCase):
+    FAN_YAML = "\n".join([
+        'roadmap_version: 2',
+        'phases:',
+        '  - id: "01"',
+        '    title: "Settle Korean response-style update"',
+        '    status: "done"',
+        '    depends_on: []',
+        '  - id: "02"',
+        '    title: "Harden command skill consistency"',
+        '    status: "done"',
+        '    depends_on: ["01"]',
+        '  - id: "03"',
+        '    title: "Korean stage-based DAG status output"',
+        '    status: "done"',
+        '    depends_on: ["02"]',
+        '  - id: "04-1"',
+        '    title: "Improve init roadmap authoring"',
+        '    status: "pending"',
+        '    depends_on: ["03"]',
+        '  - id: "04-2"',
+        '    title: "Harden lifecycle status CLI"',
+        '    status: "pending"',
+        '    depends_on: ["03"]',
+        '  - id: "05"',
+        '    title: "Plugin discovery and release polish"',
+        '    status: "pending"',
+        '    depends_on: ["04-1", "04-2"]',
+    ])
+
+    def _make(self, project: Path, body: str) -> None:
+        _write_roadmap(project, body)
+
+    def test_full_render_plain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(Path(tmp), self.FAN_YAML)
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=False, size=(70, 24))
+            lines = out.splitlines()
+            self.assertIn("Wily Roadmap", out)
+            self.assertIn("3/6", out)
+            self.assertIn("50%", out)
+            self.assertTrue(any(line.lstrip().startswith("+--> 04-1") for line in lines))
+            self.assertTrue(any(line.lstrip().startswith("+--> 04-2") for line in lines))
+            self.assertTrue(any(line.strip() == "v" for line in lines))
+            self.assertIn("deps 04-1 04-2", out)
+            self.assertIn("git:", out)
+
+    def test_render_collapses_when_short(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(Path(tmp), self.FAN_YAML)
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=False, size=(70, 8))
+            self.assertIn("3 phases done", out)
+            self.assertIn("04-1", out)
+            self.assertIn("04-2", out)
+            self.assertIn("05", out)
+
+    def test_render_falls_back_to_flat_for_skip_dag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(Path(tmp), "\n".join([
+                'roadmap_version: 1',
+                'phases:',
+                '  - id: "01"',
+                '    title: "A"',
+                '    status: "done"',
+                '    depends_on: []',
+                '  - id: "02"',
+                '    title: "B"',
+                '    status: "done"',
+                '    depends_on: ["01"]',
+                '  - id: "03"',
+                '    title: "C"',
+                '    status: "pending"',
+                '    depends_on: ["02", "01"]',
+            ]))
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=False, size=(70, 24))
+            self.assertIn("Stage 1", out)
+            self.assertFalse(any(line.lstrip().startswith("+--") for line in out.splitlines()))
+
+    def test_render_narrow_one_liner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(Path(tmp), self.FAN_YAML)
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=False, size=(18, 24))
+            self.assertEqual(len(out.splitlines()), 1)
+            self.assertIn("Wily", out)
+            self.assertIn("3/6", out)
+            self.assertLessEqual(len(out), 18)
+
+    def test_render_no_roadmap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=False, size=(70, 24))
+            self.assertIn("no roadmap", out)
+            self.assertIn("$wily-init", out)
+            self.assertIn("git:", out)
+
+    def test_render_zero_phases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(Path(tmp), "roadmap_version: 3\nphases: []\n")
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=False, size=(70, 24))
+            self.assertIn("0/0", out)
+            self.assertIn("no phases yet", out)
+
+    def test_render_rich_smoke(self) -> None:
+        try:
+            import rich  # noqa: F401
+        except ImportError:
+            self.skipTest("rich not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(Path(tmp), self.FAN_YAML)
+            out = wily_watch_ui.render_watch(Path(tmp), interval=2.0, rich=True, size=(70, 24))
+            plain = ANSI_RE.sub("", out) if "ANSI_RE" in globals() else out
+            for pid in ("01", "02", "03", "04-1", "04-2", "05"):
+                self.assertIn(pid, plain)

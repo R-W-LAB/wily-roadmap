@@ -283,7 +283,6 @@ def _node_line(
 ) -> Line:
     status = _phase_status(phase, ready_ids)
     glyphs = GLYPHS_ASCII if ascii_ else GLYPHS
-    rails = RAIL_ASCII if ascii_ else RAIL
     glyph = glyphs.get(status, glyphs["pending"])
     style = STYLES.get(status, "")
     pid = str(phase.get("id", "?"))
@@ -292,7 +291,7 @@ def _node_line(
     unmet = dependency_ids if dependency_ids is not None else _unmet_deps(phase, by_id)
     dep_text = ""
     if unmet:
-        marker = dependency_marker or rails["dep"]
+        marker = dependency_marker or "needs"
         dep_text = f"   {marker} " + " ".join(unmet)
 
     title_width = max(0, width - len(prefix) - len(glyph) - len(id_text) - len(dep_text))
@@ -379,7 +378,7 @@ def _graph_lines2(
             dependency_marker = None
             if previous_wide and not stage_wide:
                 dependency_ids = [str(dep) for dep in phase.get("depends_on") or []]
-                dependency_marker = "deps" if ascii_ else RAIL["dep"]
+                dependency_marker = "deps"
             lines.append(
                 _node_line(
                     phase,
@@ -450,6 +449,41 @@ def _collapse_leading_done(lines: list[Line], kinds: list[str], *, ascii_: bool)
     return [_summary_line(done_count, ascii_)] + lines[index:], ["done"] + kinds[index:]
 
 
+def _one_line(view: _RoadmapView, root: Path, ascii_: bool) -> str:
+    sep = " - " if ascii_ else " · "
+    if view.roadmap is None:
+        return f" Wily{sep}no roadmap"
+    return f" Wily v{view.version}{sep}{view.done}/{view.total} done"
+
+
+def _body_lines(
+    view: _RoadmapView,
+    *,
+    width: int,
+    max_rows: int | None,
+    ascii_: bool,
+) -> list[Line]:
+    if not view.phases:
+        return [[(" (no phases yet)", "dim")]]
+
+    if _pipeline_renderable(view.phases) and width >= MIN_WIDTH_RAIL:
+        lines, kinds = _graph_lines2(view.phases, view.ready_ids, width=width, ascii_=ascii_)
+    else:
+        lines, kinds = _flat_lines2(view.phases, view.ready_ids, width=width, ascii_=ascii_)
+
+    if max_rows is not None and len(lines) > max_rows:
+        lines, kinds = _collapse_leading_done(lines, kinds, ascii_=ascii_)
+
+    if max_rows is not None and len(lines) > max_rows:
+        if max_rows == 1:
+            return lines[:1]
+        if kinds and kinds[0] == "done":
+            return [lines[0]] + lines[-(max_rows - 1) :]
+        return lines[-max_rows:]
+
+    return lines
+
+
 def _emit(lines: list[Line], *, rich: bool, width: int) -> str:
     if not rich:
         return "\n".join("".join(text for text, _style in line).rstrip() for line in lines)
@@ -483,4 +517,30 @@ def render_watch(
     rich: bool,
     size: tuple[int, int] | None = None,
 ) -> str:
-    return ""
+    cols, rows = size if size is not None else shutil.get_terminal_size((80, 24))
+    ascii_ = not rich
+    view = _load(root)
+
+    if cols < MIN_WIDTH_ONELINE:
+        return _emit([_crop_line([(_one_line(view, root, ascii_), "bold")], cols)], rich=rich, width=cols)
+
+    if view.roadmap is None:
+        lines = [
+            _crop_line([(_one_line(view, root, ascii_), "bold")], cols),
+            _crop_line([(" run $wily-init to start", "dim")], cols),
+            _rule_line(cols, ascii_),
+            _footer_line(root, width=cols, ascii_=ascii_),
+        ]
+        return _emit(lines, rich=rich, width=cols)
+
+    max_rows = max(1, rows - CHROME_ROWS) if rows else None
+    body = _body_lines(view, width=cols, max_rows=max_rows, ascii_=ascii_)
+    lines = [
+        _header_line(version=view.version, interval=interval, width=cols, ascii_=ascii_),
+        _progress_line(done=view.done, total=view.total, width=cols, ascii_=ascii_),
+        _rule_line(cols, ascii_),
+        *body,
+        _rule_line(cols, ascii_),
+        _footer_line(root, width=cols, ascii_=ascii_),
+    ]
+    return _emit(lines, rich=rich, width=cols)
