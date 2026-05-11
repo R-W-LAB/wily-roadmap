@@ -79,6 +79,49 @@ class TruncateAndEmitTest(unittest.TestCase):
         )
 
 
+class ChromeTest(unittest.TestCase):
+    def test_header_left_and_right_within_width(self) -> None:
+        line = wily_watch_ui._header_line(version=2, interval=2.0, width=40, ascii_=True)
+        text = "".join(span for span, _style in line)
+        self.assertEqual(len(text), 40)
+        self.assertTrue(text.startswith(" Wily Roadmap"))
+        self.assertIn("v2", text)
+        self.assertTrue(text.rstrip().endswith("~ 2s"))
+
+    def test_progress_bar_half_full(self) -> None:
+        line = wily_watch_ui._progress_line(done=3, total=6, width=40, ascii_=True)
+        text = "".join(span for span, _style in line)
+        self.assertIn("3/6", text)
+        self.assertIn("50%", text)
+        self.assertIn("#", text)
+        self.assertIn("-", text)
+
+    def test_progress_zero_total(self) -> None:
+        line = wily_watch_ui._progress_line(done=0, total=0, width=40, ascii_=True)
+        text = "".join(span for span, _style in line)
+        self.assertIn("0/0", text)
+        self.assertIn("0%", text)
+
+    def test_footer_clean_and_dirty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            line = wily_watch_ui._footer_line(Path(tmp), width=60, ascii_=True)
+            text = "".join(span for span, _style in line)
+            self.assertIn("git:", text)
+            self.assertIn(Path(tmp).name, text)
+            self.assertIn("^C to stop", text)
+
+    def test_header_tiny_width_does_not_exceed_width(self) -> None:
+        line = wily_watch_ui._header_line(version=2, interval=2.0, width=12, ascii_=True)
+        text = "".join(span for span, _style in line)
+        self.assertLessEqual(len(text), 12)
+
+    def test_footer_tiny_width_does_not_exceed_width(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            line = wily_watch_ui._footer_line(Path(tmp), width=12, ascii_=True)
+            text = "".join(span for span, _style in line)
+            self.assertLessEqual(len(text), 12)
+
+
 class NodeLineTest(unittest.TestCase):
     def _phases(self):
         return [

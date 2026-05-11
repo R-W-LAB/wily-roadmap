@@ -209,6 +209,66 @@ def _crop_line(line: Line, width: int) -> Line:
     return cropped
 
 
+def _rule_line(width: int, ascii_: bool) -> Line:
+    fill = "-" if ascii_ else "─"
+    return _crop_line([(f" {fill * max(0, width - 1)}", "dim")], width)
+
+
+def _header_line(*, version: Any, interval: float, width: int, ascii_: bool) -> Line:
+    rails = RAIL_ASCII if ascii_ else RAIL
+    sep = " - " if ascii_ else " · "
+    left = f" Wily Roadmap{sep}v{version}"
+    right = f"{rails['refresh']} {interval:g}s "
+
+    if len(left) + len(right) > width:
+        return _crop_line([(left, "bold"), (right, "dim")], width)
+
+    padding = " " * (width - len(left) - len(right))
+    return [(left, "bold"), (padding, ""), (right, "dim")]
+
+
+def _progress_line(*, done: int, total: int, width: int, ascii_: bool) -> Line:
+    rails = RAIL_ASCII if ascii_ else RAIL
+    ratio = done / total if total else 0.0
+    pct = round(ratio * 100)
+    sep = " - " if ascii_ else " · "
+    label = f" {done}/{total}{sep}{pct}%"
+    bar_w = max(10, min(28, width // 3))
+    max_bar_w = max(0, width - len(rails["lo"]) - len(rails["ro"]) - len(label))
+    if len(rails["lo"]) + bar_w + len(rails["ro"]) + len(label) > width:
+        bar_w = max_bar_w
+    filled = min(bar_w, max(0, round(bar_w * ratio)))
+    empty = max(0, bar_w - filled)
+
+    return _crop_line(
+        [
+            (rails["lo"], "dim"),
+            (rails["full"] * filled, "green"),
+            (rails["empty"] * empty, "dim"),
+            (rails["ro"], "dim"),
+            (label, ""),
+        ],
+        width,
+    )
+
+
+def _git_state(root: Path, ascii_: bool) -> str:
+    raw = wily_state_summary.git_status(root)
+    if raw == "not a git repo":
+        return "-" if ascii_ else "—"
+    match = re.match(r"(\d+) changed", raw)
+    if match:
+        changed = int(match.group(1))
+        return "clean" if changed == 0 else f"{changed} changed"
+    return raw
+
+
+def _footer_line(root: Path, *, width: int, ascii_: bool) -> Line:
+    sep = " - " if ascii_ else " · "
+    text = f" git: {_git_state(root, ascii_)}{sep}{root.name}{sep}^C to stop"
+    return _crop_line([(text, "dim")], width)
+
+
 def _node_line(
     phase: Phase,
     ready_ids: set[str],
