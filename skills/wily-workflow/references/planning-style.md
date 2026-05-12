@@ -85,7 +85,7 @@ Recommended planner: superpowers:writing-plans
 
 Each phase should:
 
-- be executable in one focused Codex session,
+- be executable in one focused agent session,
 - have a clear behavioral outcome,
 - list dependencies and parallel eligibility,
 - include expected files or modules,

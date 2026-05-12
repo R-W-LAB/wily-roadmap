@@ -121,6 +121,10 @@ class WilyCommandSkillsTest(unittest.TestCase):
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "wily-roadmap")
         self.assertEqual(manifest["interface"]["displayName"], "Wily Roadmap")
+        self.assertEqual(manifest["skills"], "./skills/")
+        self.assertIn("codex", manifest["keywords"])
+        self.assertIn("Claude Code", manifest["interface"]["longDescription"])
+        self.assertIn("Codex plugin discovery", manifest["interface"]["longDescription"])
         prompts = manifest["interface"]["defaultPrompt"]
         joined = "\n".join(prompts)
         self.assertIn("$wily-init", joined)
@@ -176,6 +180,41 @@ class WilyCommandSkillsTest(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
                 self.assertIn("Wily Roadmap", text)
                 self.assertNotIn("Phase 흐름:", text)
+
+    def test_workflow_documents_claude_code_compatibility(self) -> None:
+        workflow = (ROOT / "skills" / "wily-workflow" / "SKILL.md").read_text(encoding="utf-8")
+        compatibility = (
+            ROOT / "skills" / "wily-workflow" / "references" / "agent-compatibility.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Agent compatibility", workflow)
+        self.assertIn("references/agent-compatibility.md", workflow)
+        self.assertIn("Claude Code", compatibility)
+        self.assertIn("Use the `$wily-*` text commands as user-facing entrypoints.", compatibility)
+        self.assertIn("Run `python3 <plugin-root>/scripts/wily.py <command>`", compatibility)
+        self.assertIn("Keep Wily local-first and approval-first in every agent environment.", compatibility)
+
+    def test_live_skill_guidance_is_not_codex_only(self) -> None:
+        paths = [
+            ROOT / "skills" / "wily-init" / "SKILL.md",
+            ROOT / "skills" / "wily-start" / "SKILL.md",
+            ROOT / "skills" / "wily-workflow" / "SKILL.md",
+            ROOT / "skills" / "wily-workflow" / "references" / "planning-style.md",
+            ROOT / "skills" / "wily-workflow" / "references" / "routing-policy.md",
+        ]
+        forbidden = (
+            "leaves Codex responsible",
+            "fresh Codex session",
+            "Codex-sized phases",
+            "Codex still owns",
+            "one focused Codex session",
+            "Codex judgment",
+        )
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for phrase in forbidden:
+                with self.subTest(path=path, phrase=phrase):
+                    self.assertNotIn(phrase, text)
 
     def test_wily_watch_opens_tmux_pane_by_default(self) -> None:
         text = self.skill_text("wily-watch")

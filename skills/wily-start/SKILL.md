@@ -21,7 +21,7 @@ python3 <plugin-root>/scripts/wily.py start <phase-id>
 
 - $wily-start is session bookkeeping only.
 - Run only when the user explicitly chooses to start a phase session.
-- Prefer starting in a fresh Codex session.
+- Prefer starting in a fresh agent session.
 - After start, read the generated `session/input.md`.
 - Report the session path and immediate next action, then stop.
 - Do not continue into implementation in the same turn.

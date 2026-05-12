@@ -1,15 +1,15 @@
 ---
 name: wily-workflow
-description: "Use when the user wants Wily's personal Codex workflow for software work: initialize or inspect per-repo .wily state, turn a large goal into dependency-aware roadmap phases, choose the next safe phase, execute a phase through an auditable session, revise future roadmap work, summarize progress, or keep remote/destructive actions approval-first."
+description: "Use when the user wants Wily's personal agent workflow for software work: initialize or inspect per-repo .wily state, turn a large goal into dependency-aware roadmap phases, choose the next safe phase, execute a phase through an auditable session, revise future roadmap work, summarize progress, or keep remote/destructive actions approval-first."
 metadata:
-  short-description: Wily Roadmap workflow for Codex
+  short-description: Wily Roadmap workflow for agentic coding
 ---
 
 # Wily Roadmap
 
 ## Purpose
 
-Use this skill to manage large software work with Wily's local roadmap model. Wily stores project state in `.wily/`, splits large goals into Codex-sized phases, tracks dependencies and parallel candidates, records each execution attempt as a session, and preserves completed history when plans change.
+Use this skill to manage large software work with Wily's local roadmap model. Wily stores project state in `.wily/`, splits large goals into focused agent-sized phases, tracks dependencies and parallel candidates, records each execution attempt as a session, and preserves completed history when plans change.
 
 Wily owns the Roadmap Plan. External planners may own detailed Phase Implementation Plans when a phase truly needs one. Keep command handling fast: Wily command skills should not invoke external planners or broad verification just to route, inspect, start, retry, block, or complete roadmap state.
 
@@ -53,7 +53,7 @@ For deterministic local state operations, use the helper script:
 python3 <plugin-root>/scripts/wily.py <command>
 ```
 
-The script handles repeatable filesystem work such as `init`, `status`, `next`, `start`, `complete`, `block`, `retry`, `replan`, and one-shot `watch` rendering. Codex still owns interpretation, user approval, phase design, planner selection, implementation, and verification.
+The script handles repeatable filesystem work such as `init`, `status`, `next`, `start`, `complete`, `block`, `retry`, `replan`, and one-shot `watch` rendering. The active agent still owns interpretation, user approval, phase design, planner selection, implementation, and verification.
 
 `$wily-init` scans the repository. If the user already provided a final goal, combine that goal with the scan. If not, summarize the current implementation first, then ask for the intended final outcome before creating a roadmap.
 
@@ -150,6 +150,7 @@ Read detailed policy only when needed:
 - Phase/session execution: `references/commit-policy.md`
 - Remote and destructive action policy: `references/pr-policy.md`
 - Quiet user-facing responses: `references/response-style.md`
+- Agent compatibility and Claude Code usage: `references/agent-compatibility.md`
 
 ## Response Style
 

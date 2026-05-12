@@ -64,4 +64,4 @@ python3 <plugin-root>/scripts/wily.py replan "Reason"
 python3 <plugin-root>/scripts/wily.py watch
 ```
 
-The helper does not replace Codex judgment. It creates and reads files; Codex still scans the repository, designs phases, asks for approval, implements approved work, and records verification.
+The helper does not replace agent judgment. It creates and reads files; the active agent still scans the repository, designs phases, asks for approval, implements approved work, and records verification.

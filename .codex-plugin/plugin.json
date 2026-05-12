@@ -1,7 +1,7 @@
 {
   "name": "wily-roadmap",
   "version": "0.1.0",
-  "description": "Personal Codex workflow plugin for Wily roadmap, phase, and session management.",
+  "description": "Personal agent workflow plugin for Wily roadmap, phase, and session management.",
   "author": {
     "name": "Wily Castle",
     "email": "",
@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Wily Roadmap",
-    "shortDescription": "Manage large Codex projects with Wily roadmaps and phases.",
-    "longDescription": "A personal Codex workflow plugin for local-first project roadmaps: initialize per-repo .wily state, split large goals into dependency-aware phases, execute phases through auditable sessions, revise future work without rewriting completed history, and require approval for remote or destructive actions.",
+    "shortDescription": "Manage large agentic coding projects with Wily roadmaps and phases.",
+    "longDescription": "A personal agent workflow plugin for local-first project roadmaps: initialize per-repo .wily state, split large goals into dependency-aware phases, execute phases through auditable sessions, revise future work without rewriting completed history, require approval for remote or destructive actions, document Claude Code usage, and preserve Codex plugin discovery compatibility.",
     "developerName": "Wily Castle",
     "category": "Productivity",
     "capabilities": [

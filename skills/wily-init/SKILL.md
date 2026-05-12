@@ -28,7 +28,7 @@ python3 <plugin-root>/scripts/wily.py init "<goal>"
    python3 <plugin-root>/scripts/wily.py init "<goal>"
    ```
 
-   If no goal is available yet, run `python3 <plugin-root>/scripts/wily.py init`; it creates baseline state, prints `Goal: needed`, and leaves Codex responsible for the repository scan and goal question.
+   If no goal is available yet, run `python3 <plugin-root>/scripts/wily.py init`; it creates baseline state, prints `Goal: needed`, and leaves the active agent responsible for the repository scan and goal question.
 
 5. Build the Roadmap Plan in `.wily/roadmap.yaml` and phase skeletons under `.wily/phases/` only after the goal is clear.
 
