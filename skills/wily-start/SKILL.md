@@ -11,7 +11,7 @@ Use `$wily-start <phase-id>` to open a tracked execution session for an approved
 
 This is state-changing. It creates a session, marks the phase `in_progress`, records the phase context bundle, and increments the attempt number.
 
-## Command
+## Internal Command
 
 ```bash
 python3 <plugin-root>/scripts/wily.py start <phase-id>
@@ -34,3 +34,7 @@ python3 <plugin-root>/scripts/wily.py start <phase-id>
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
+- Do not echo internal helper commands in normal user-facing responses.
+- Report only the result, the relevant path or artifact, and the next action or blocker.
+- Keep safety-critical approval requirements when they apply.
+- For a successful start, include the phase id, `Session:` path, and one immediate next action, then stop.

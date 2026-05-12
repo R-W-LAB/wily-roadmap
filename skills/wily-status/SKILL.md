@@ -11,7 +11,7 @@ Use `$wily-status` to show the current `.wily` roadmap pane once.
 
 This is read-only. It must not create sessions, change phase status, or revise roadmap files.
 
-## Command
+## Internal Command
 
 ```bash
 python3 <plugin-root>/scripts/wily.py status
@@ -31,6 +31,9 @@ python3 <plugin-root>/scripts/wily.py status
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
+- Do not echo internal helper commands in normal user-facing responses.
+- Report only the requested roadmap output or concise answer.
+- Avoid procedural narration before or after the result.
 - Include the `Wily Roadmap` pane output verbatim in the user response.
 - Do not replace the visual roadmap pane with a prose-only summary.
 - Do not switch to the fallback stage summary when the pane renderer is available.

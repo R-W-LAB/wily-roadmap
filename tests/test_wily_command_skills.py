@@ -20,6 +20,10 @@ COMMANDS = {
     "wily-replan": "scripts/wily.py replan",
 }
 
+MUTATING_COMMANDS = {"wily-init", "wily-start", "wily-complete", "wily-block", "wily-retry", "wily-replan"}
+READONLY_COMMANDS = {"wily-status", "wily-watch", "wily-next"}
+QUIET_RESPONSE_PHRASE = "Do not echo internal helper commands in normal user-facing responses."
+
 
 class WilyCommandSkillsTest(unittest.TestCase):
     def skill_text(self, command: str) -> str:
@@ -40,6 +44,14 @@ class WilyCommandSkillsTest(unittest.TestCase):
                 text = self.skill_text(command)
                 self.assertIn(helper, text)
 
+    def test_command_skills_mark_helper_commands_as_internal(self) -> None:
+        for command, helper in COMMANDS.items():
+            with self.subTest(command=command):
+                text = self.skill_text(command)
+                self.assertIn("## Internal Command", text)
+                self.assertIn(helper, text)
+                self.assertIn(QUIET_RESPONSE_PHRASE, text)
+
     def test_command_skills_define_boundaries(self) -> None:
         mutating = {"wily-init", "wily-start", "wily-complete", "wily-block", "wily-retry", "wily-replan"}
         readonly = {"wily-status", "wily-watch", "wily-next"}
@@ -49,6 +61,28 @@ class WilyCommandSkillsTest(unittest.TestCase):
         for command in readonly:
             with self.subTest(command=command):
                 self.assertIn("read-only", self.skill_text(command))
+
+    def test_state_changing_commands_report_only_result_artifact_and_next_action(self) -> None:
+        required = (
+            "Report only the result, the relevant path or artifact, and the next action or blocker.",
+            "Keep safety-critical approval requirements when they apply.",
+        )
+        for command in MUTATING_COMMANDS:
+            with self.subTest(command=command):
+                text = self.skill_text(command)
+                for phrase in required:
+                    self.assertIn(phrase, text)
+
+    def test_readonly_commands_keep_output_concise(self) -> None:
+        required = (
+            "Report only the requested roadmap output or concise answer.",
+            "Avoid procedural narration before or after the result.",
+        )
+        for command in READONLY_COMMANDS:
+            with self.subTest(command=command):
+                text = self.skill_text(command)
+                for phrase in required:
+                    self.assertIn(phrase, text)
 
     def test_command_skills_do_not_invoke_external_planners_or_test_runners(self) -> None:
         forbidden = (

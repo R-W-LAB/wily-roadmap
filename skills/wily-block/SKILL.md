@@ -11,7 +11,7 @@ Use `$wily-block <phase-id> "<reason>"` to record that a phase is blocked.
 
 This is state-changing. It marks the phase `blocked`, records the blocker in roadmap state, and marks the current session `blocked`.
 
-## Command
+## Internal Command
 
 ```bash
 python3 <plugin-root>/scripts/wily.py block <phase-id> "<reason>"
@@ -28,3 +28,7 @@ python3 <plugin-root>/scripts/wily.py block <phase-id> "<reason>"
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
+- Do not echo internal helper commands in normal user-facing responses.
+- Report only the result, the relevant path or artifact, and the next action or blocker.
+- Keep safety-critical approval requirements when they apply.
+- For a block, include the phase id, blocker reason, and the smallest unblock requirement.

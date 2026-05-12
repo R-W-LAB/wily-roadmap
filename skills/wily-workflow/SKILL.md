@@ -149,10 +149,12 @@ Read detailed policy only when needed:
 - Phase and roadmap structure: `references/planning-style.md`
 - Phase/session execution: `references/commit-policy.md`
 - Remote and destructive action policy: `references/pr-policy.md`
+- Quiet user-facing responses: `references/response-style.md`
 
 ## Response Style
 
 - Be direct and concrete.
 - Lead with current state, next action, and blockers.
+- Do not echo internal helper commands in normal user-facing responses.
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
 - Use Korean when the user is speaking Korean, but keep file content and machine-facing markers in English.

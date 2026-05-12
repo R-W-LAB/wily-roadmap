@@ -11,12 +11,18 @@ Use `$wily-init` to create or refresh the project-level Roadmap Plan.
 
 This is state-changing. It may create `.wily/`, write baseline project files, and define roadmap phases.
 
+## Internal Command
+
+```bash
+python3 <plugin-root>/scripts/wily.py init "<goal>"
+```
+
 ## First Move
 
 1. Read applicable `AGENTS.md`.
 2. Inspect the repository structure, docs, tests, and current `git status --short`.
 3. If the user supplied a goal, use it. If not, summarize current state and ask for the intended final outcome before authoring roadmap phases.
-4. Ensure local state exists with:
+4. Ensure local state exists with this internal helper command:
 
    ```bash
    python3 <plugin-root>/scripts/wily.py init "<goal>"
@@ -41,3 +47,7 @@ This is state-changing. It may create `.wily/`, write baseline project files, an
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
+- Do not echo internal helper commands in normal user-facing responses.
+- Report only the result, the relevant path or artifact, and the next action or blocker.
+- Keep safety-critical approval requirements when they apply.
+- If no goal is available, ask only for the intended final outcome after reporting baseline state.

@@ -11,7 +11,7 @@ Use `$wily-watch` to show a continuously refreshing `.wily` roadmap view.
 
 This is read-only. It must not create sessions, change phase status, revise roadmap files, or implement phases.
 
-## Command
+## Internal Command
 
 ```bash
 python3 <plugin-root>/scripts/wily.py watch --pane
@@ -39,3 +39,7 @@ python3 <plugin-root>/scripts/wily.py watch --pane
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
+- Do not echo internal helper commands in normal user-facing responses.
+- Report only the requested roadmap output or concise answer.
+- Avoid procedural narration before or after the result.
+- If the pane opens, report that it opened and how to stop it; show fallback commands only when tmux is unavailable.
