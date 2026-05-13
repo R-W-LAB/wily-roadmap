@@ -12,6 +12,7 @@ COMMANDS = {
     "wily-init": "scripts/wily.py init",
     "wily-status": "scripts/wily.py status",
     "wily-watch": "scripts/wily.py watch",
+    "wily-issues": "scripts/wily.py issues",
     "wily-next": "scripts/wily.py next",
     "wily-start": "scripts/wily.py start",
     "wily-complete": "scripts/wily.py complete",
@@ -21,7 +22,7 @@ COMMANDS = {
 }
 
 MUTATING_COMMANDS = {"wily-init", "wily-start", "wily-complete", "wily-block", "wily-retry", "wily-replan"}
-READONLY_COMMANDS = {"wily-status", "wily-watch", "wily-next"}
+READONLY_COMMANDS = {"wily-status", "wily-watch", "wily-issues", "wily-next"}
 QUIET_RESPONSE_PHRASE = "Do not echo internal helper commands in normal user-facing responses."
 
 
@@ -129,6 +130,7 @@ class WilyCommandSkillsTest(unittest.TestCase):
         joined = "\n".join(prompts)
         self.assertIn("$wily-init", joined)
         self.assertIn("$wily-status", joined)
+        self.assertIn("$wily-issues", joined)
         self.assertIn("$wily-next", joined)
 
     def test_readme_documents_repo_local_zsh_launcher(self) -> None:
@@ -209,6 +211,18 @@ class WilyCommandSkillsTest(unittest.TestCase):
         self.assertIn("Use the `$wily-*` text commands as user-facing entrypoints.", compatibility)
         self.assertIn("Run `python3 <plugin-root>/scripts/wily.py <command>`", compatibility)
         self.assertIn("Keep Wily local-first and approval-first in every agent environment.", compatibility)
+
+    def test_workflow_documents_github_issues_policy(self) -> None:
+        workflow = (ROOT / "skills" / "wily-workflow" / "SKILL.md").read_text(encoding="utf-8")
+        policy = (
+            ROOT / "skills" / "wily-workflow" / "references" / "github-issues-policy.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("references/github-issues-policy.md", workflow)
+        self.assertIn("GitHub Issues are optional", policy)
+        self.assertIn("GitHub Issues are the collaboration source of truth", policy)
+        self.assertIn("Wily is the roadmap and execution source of truth", policy)
+        self.assertIn("Do not add unlinked issues to the roadmap without user approval.", policy)
 
     def test_live_skill_guidance_is_not_codex_only(self) -> None:
         paths = [

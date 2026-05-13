@@ -39,6 +39,7 @@ Use `$wily-workflow` as the general router when the right command is unclear. Pr
 $wily-init
 $wily-status
 $wily-watch
+$wily-issues
 $wily-next
 $wily-start <phase-id>
 $wily-complete <phase-id>
@@ -62,6 +63,8 @@ The script handles repeatable filesystem work such as `init`, `status`, `next`, 
 `$wily-status` renders the current `Wily Roadmap` pane once. It uses the same visual roadmap renderer as `$wily-watch`, including the progress bar, stage lines, phase glyphs, dependency hints, and git footer. Do not replace it with the fallback prose or stage-summary output.
 
 `$wily-watch` renders the same `Wily Roadmap` pane in a continuously refreshing read-only view for tmux panes. It must not create sessions, change roadmap state, or implement phases.
+
+`$wily-issues` explicitly inspects optional GitHub Issues linkage. Its default mode is read-only; approved local roadmap additions use Wily state only and do not write to GitHub.
 
 `$wily-start <id>` records an approved phase session and marks the phase `in_progress`. This command is session bookkeeping only: after reporting the session path, stop. Do not create plans, edit phase target files, run implementation verification, or continue into implementation in the same turn. A separate explicit user request after the start result is required before implementation.
 
@@ -151,6 +154,7 @@ Read detailed policy only when needed:
 - Remote and destructive action policy: `references/pr-policy.md`
 - Quiet user-facing responses: `references/response-style.md`
 - Agent compatibility and Claude Code usage: `references/agent-compatibility.md`
+- Optional GitHub Issues linkage: `references/github-issues-policy.md`
 
 ## Response Style
 

@@ -566,6 +566,106 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn("Pending but unblocked", result.stdout)
             self.assertIn("Run next layer", result.stdout)
 
+    def test_issues_reports_unlinked_and_linked_issues_from_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.create_state(project)
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 1',
+                        'goal: "Ship useful app"',
+                        'phases:',
+                        '  - id: "01"',
+                        '    title: "Existing linked phase"',
+                        '    path: "phases/01-existing-linked-phase"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                        '    github_issues: ["#123"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            issues = (
+                '[{"number":123,"title":"Existing linked phase","state":"OPEN","url":"https://github.com/o/r/issues/123"},'
+                '{"number":128,"title":"Add settings export","state":"OPEN","url":"https://github.com/o/r/issues/128"}]'
+            )
+
+            result = self.run_wily_with_env(project, "issues", env={"WILY_ISSUES_JSON": issues})
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("GitHub Issues", result.stdout)
+            self.assertIn("Linked issues:", result.stdout)
+            self.assertIn("#123 Existing linked phase -> 01", result.stdout)
+            self.assertIn("Unlinked open issues:", result.stdout)
+            self.assertIn("#128 Add settings export", result.stdout)
+            self.assertIn("Suggested roadmap additions:", result.stdout)
+            self.assertIn("Run with `--add-to-roadmap` only after approval.", result.stdout)
+
+    def test_issues_add_to_roadmap_creates_local_phase_for_unlinked_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.create_state(project)
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 1',
+                        'goal: "Ship useful app"',
+                        'phases:',
+                        '  - id: "01"',
+                        '    title: "Foundation"',
+                        '    path: "phases/01-foundation"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            issues = '[{"number":128,"title":"Add settings export","state":"OPEN","url":"https://github.com/o/r/issues/128"}]'
+
+            result = self.run_wily_with_env(project, "issues", "--add-to-roadmap", env={"WILY_ISSUES_JSON": issues})
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Added roadmap phases from GitHub issues:", result.stdout)
+            self.assertIn("02 #128 Add settings export", result.stdout)
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('roadmap_version: 2', roadmap)
+            self.assertIn('title: "#128 Add settings export"', roadmap)
+            self.assertIn('github_issues: ["#128"]', roadmap)
+            self.assertIn('github_urls: ["https://github.com/o/r/issues/128"]', roadmap)
+            phase_dir = project / ".wily" / "phases" / "02-github-issue-128-add-settings-export"
+            self.assertTrue((phase_dir / "phase.md").is_file())
+            self.assertIn("https://github.com/o/r/issues/128", (phase_dir / "phase.md").read_text(encoding="utf-8"))
+
+    def test_issues_add_to_roadmap_handles_empty_phase_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.create_state(project)
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "roadmap_version: 1\ngoal: \"Ship useful app\"\nphases: []\n",
+                encoding="utf-8",
+            )
+            issues = '[{"number":128,"title":"Add settings export","state":"OPEN","url":"https://github.com/o/r/issues/128"}]'
+
+            result = self.run_wily_with_env(project, "issues", "--add-to-roadmap", env={"WILY_ISSUES_JSON": issues})
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('  - id: "01"', roadmap)
+            self.assertIn('title: "#128 Add settings export"', roadmap)
+
+    def test_issues_without_source_reports_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.create_state(project)
+            (project / ".wily" / "roadmap.yaml").write_text("roadmap_version: 1\nphases: []\n", encoding="utf-8")
+
+            result = self.run_wily_with_env(project, "issues", env={"PATH": ""})
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("GitHub issue source not configured.", result.stdout)
+            self.assertIn("Core Wily commands do not require GitHub Issues.", result.stdout)
+
     def test_serialize_parse_preserves_replacement_metadata(self) -> None:
         roadmap = {
             "roadmap_version": 2,

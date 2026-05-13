@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -17,6 +19,7 @@ import wily_watch_ui
 
 
 Phase = dict[str, Any]
+Issue = dict[str, Any]
 
 
 def state_dir(root: Path) -> Path:
@@ -223,6 +226,225 @@ def serialize_roadmap(roadmap: dict[str, Any]) -> str:
 
 def phase_slug(phase_id: str) -> str:
     return phase_id.lower().replace("/", "-")
+
+
+def slugify_title(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "issue"
+
+
+def issue_ref(issue: Issue) -> str:
+    return f"#{issue.get('number')}"
+
+
+def issue_title(issue: Issue) -> str:
+    return str(issue.get("title") or "Untitled issue")
+
+
+def issue_state(issue: Issue) -> str:
+    return str(issue.get("state") or "OPEN").upper()
+
+
+def phase_github_refs(phase: Phase) -> set[str]:
+    refs: set[str] = set()
+    for key in ("github_issues", "github_issue"):
+        value = phase.get(key)
+        if isinstance(value, list):
+            refs.update(str(item) for item in value)
+        elif value:
+            refs.add(str(value))
+    return refs
+
+
+def load_github_issues(root: Path) -> tuple[list[Issue], str | None]:
+    fixture = os.environ.get("WILY_ISSUES_JSON")
+    if fixture:
+        try:
+            loaded = json.loads(fixture)
+        except json.JSONDecodeError as exc:
+            return [], f"Invalid WILY_ISSUES_JSON: {exc}"
+        if not isinstance(loaded, list):
+            return [], "Invalid WILY_ISSUES_JSON: expected a list"
+        return [issue for issue in loaded if isinstance(issue, dict)], None
+
+    command = [
+        "gh",
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--limit",
+        "100",
+        "--json",
+        "number,title,state,url,assignees,labels",
+    ]
+    try:
+        result = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except FileNotFoundError:
+        return [], "GitHub issue source not configured."
+    if result.returncode != 0:
+        return [], "GitHub issue source not configured."
+    try:
+        loaded = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return [], "GitHub issue source returned invalid JSON."
+    if not isinstance(loaded, list):
+        return [], "GitHub issue source returned invalid JSON."
+    return [issue for issue in loaded if isinstance(issue, dict)], None
+
+
+def linked_issue_map(phases: list[Phase]) -> dict[str, Phase]:
+    linked: dict[str, Phase] = {}
+    for phase in phases:
+        for ref in phase_github_refs(phase):
+            linked[ref] = phase
+    return linked
+
+
+def next_numeric_phase_id(phases: list[Phase]) -> str:
+    numeric = []
+    for phase in phases:
+        pid = str(phase.get("id", ""))
+        if pid.isdigit():
+            numeric.append(int(pid))
+    return f"{(max(numeric) if numeric else 0) + 1:02d}"
+
+
+def write_issue_phase(root: Path, phase: Phase, issue: Issue) -> None:
+    folder = state_dir(root) / str(phase["path"])
+    folder.mkdir(parents=True, exist_ok=True)
+    number = issue_ref(issue)
+    title = issue_title(issue)
+    url = str(issue.get("url") or "")
+    (folder / "phase.md").write_text(
+        "\n".join(
+            [
+                f"# Phase {phase['id']}: {number} {title}",
+                "",
+                "## Purpose",
+                "",
+                f"Implement or resolve GitHub issue {number}.",
+                "",
+                "## GitHub Issue",
+                "",
+                f"- Issue: {number}",
+                f"- URL: {url or 'not provided'}",
+                "",
+                "## Expected Starting Conditions",
+                "",
+                "- The issue remains open and assigned or accepted for Wily roadmap work.",
+                "",
+                "## Known Risks",
+                "",
+                "- GitHub issue details may change after this phase is created.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (folder / "planner.md").write_text(
+        "# Planner Adapter\n\nRecommended planner: superpowers:writing-plans\n\nUse the planner when issue scope needs detailed implementation steps.\n",
+        encoding="utf-8",
+    )
+    (folder / "prompt.md").write_text(
+        f"# Execution Prompt\n\nImplement GitHub issue {number}: {title}\n\nIssue URL: {url or 'not provided'}\n",
+        encoding="utf-8",
+    )
+    (folder / "verification.md").write_text(
+        "# Verification\n\nRun the tests or manual checks appropriate for the linked issue.\n",
+        encoding="utf-8",
+    )
+    (folder / "handoff.md").write_text(
+        f"# Handoff\n\nStart by reading GitHub issue {number} and confirming current scope before implementation.\n",
+        encoding="utf-8",
+    )
+    (folder / "plan.md").write_text("# Implementation Plan\n\nNo detailed implementation plan exists yet.\n", encoding="utf-8")
+    (folder / "notes.md").write_text(f"# Notes\n\nCreated from GitHub issue {number}.\n", encoding="utf-8")
+
+
+def command_issues(root: Path, args: list[str]) -> int:
+    add_to_roadmap = "--add-to-roadmap" in args
+    issues, error = load_github_issues(root)
+    if error:
+        print(error)
+        print("Core Wily commands do not require GitHub Issues.")
+        return 0
+
+    roadmap = load_roadmap(root)
+    phases = roadmap.get("phases")
+    if not isinstance(phases, list):
+        phases = []
+        roadmap["phases"] = phases
+    linked = linked_issue_map(phases)
+    open_issues = [issue for issue in issues if issue_state(issue) == "OPEN"]
+    linked_issues = [issue for issue in open_issues if issue_ref(issue) in linked]
+    unlinked = [issue for issue in open_issues if issue_ref(issue) not in linked]
+
+    print("GitHub Issues")
+    print()
+    print("Linked issues:")
+    if linked_issues:
+        for issue in linked_issues:
+            phase = linked[issue_ref(issue)]
+            print(f"- {issue_ref(issue)} {issue_title(issue)} -> {phase.get('id')}")
+    else:
+        print("- none")
+
+    print()
+    print("Unlinked open issues:")
+    if unlinked:
+        for issue in unlinked:
+            print(f"- {issue_ref(issue)} {issue_title(issue)}")
+    else:
+        print("- none")
+
+    if not unlinked:
+        return 0
+
+    print()
+    print("Suggested roadmap additions:")
+    next_id = next_numeric_phase_id(phases)
+    for offset, issue in enumerate(unlinked):
+        suggested = f"{int(next_id) + offset:02d}" if next_id.isdigit() else f"github-{issue.get('number')}"
+        print(f"- {suggested} {issue_ref(issue)} {issue_title(issue)}")
+
+    if not add_to_roadmap:
+        print()
+        print("Run with `--add-to-roadmap` only after approval.")
+        return 0
+
+    version = roadmap.get("roadmap_version")
+    roadmap["roadmap_version"] = (version if isinstance(version, int) else 1) + 1
+    existing_ids = {str(phase.get("id")) for phase in phases}
+    added: list[Phase] = []
+    for issue in unlinked:
+        phase_id = next_numeric_phase_id(phases)
+        while phase_id in existing_ids:
+            phase_id = f"{int(phase_id) + 1:02d}"
+        existing_ids.add(phase_id)
+        ref = issue_ref(issue)
+        title = f"{ref} {issue_title(issue)}"
+        path = f"phases/{phase_id}-github-issue-{issue.get('number')}-{slugify_title(issue_title(issue))}"
+        phase: Phase = {
+            "id": phase_id,
+            "title": title,
+            "path": path,
+            "status": "pending",
+            "depends_on": [],
+            "github_issues": [ref],
+            "github_urls": [str(issue.get("url") or "")],
+            "sync_policy": "manual",
+        }
+        phases.append(phase)
+        added.append(phase)
+        write_issue_phase(root, phase, issue)
+
+    save_roadmap(root, roadmap)
+    print()
+    print("Added roadmap phases from GitHub issues:")
+    for phase in added:
+        print(f"- {phase['id']} {phase['title']}")
+    return 0
 
 
 def session_glob(root: Path, phase_id: str) -> list[Path]:
@@ -655,6 +877,7 @@ def usage() -> str:
             "  block <phase-id> [reason]",
             "  retry <phase-id>",
             "  replan [reason]",
+            "  issues [--add-to-roadmap]",
             "  watch",
         ]
     )
@@ -684,6 +907,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_start(root, args, retry=True)
     if command == "replan":
         return command_replan(root, args)
+    if command == "issues":
+        return command_issues(root, args)
     if command == "watch":
         return command_watch(root, args)
 
