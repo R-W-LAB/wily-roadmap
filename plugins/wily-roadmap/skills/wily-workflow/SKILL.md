@@ -11,7 +11,7 @@ metadata:
 
 Use this skill to manage large software work with Wily's local roadmap model. Wily stores project state in `.wily/`, splits large goals into focused agent-sized phases, tracks dependencies and parallel candidates, records each execution attempt as a session, and preserves completed history when plans change.
 
-Wily owns the Roadmap Plan. External planners may own detailed Phase Implementation Plans when a phase truly needs one. External workflows such as Custom Workflow may execute one selected phase by reference, but Wily still owns dependencies, attempts, status transitions, replans, and durable session history. Keep command handling fast: Wily command skills should not invoke external planners or broad verification just to route, inspect, start, retry, block, or complete roadmap state.
+Wily owns the Roadmap Plan. Custom Workflow Skillset may own detailed Phase Implementation Plans and execution packages when a phase truly needs one. `$wily-run` routes one selected phase to `custom-workflow-skillset:plan-goal-runner`, with `custom-workflow-skillset:parallel-lane-runner` available only for approved bounded lanes. Wily still owns dependencies, attempts, status transitions, replans, and durable session history. Keep non-run command handling fast: Wily command skills should not invoke external planners or broad verification just to inspect, start, retry, block, or complete roadmap state.
 
 When a repository shares Wily state through Git, Wily should guide collaborators toward a lightweight source-of-truth split: commit durable roadmap state, keep active execution sessions local, pull before claiming phases, and commit/push roadmap progress only when the user has approved remote work.
 
@@ -48,6 +48,7 @@ $wily-complete <phase-id>
 $wily-block <phase-id> "<reason>"
 $wily-retry <phase-id>
 $wily-replan
+$wily-run <phase-id>
 ```
 
 For deterministic local state operations, use the helper script:
@@ -69,6 +70,8 @@ The script handles repeatable filesystem work such as `init`, `status`, `next`, 
 `$wily-issues` explicitly inspects optional GitHub Issues linkage. Its default mode is read-only; approved local roadmap additions use Wily state only and do not write to GitHub.
 
 `$wily-start <id>` records an approved phase session and marks the phase `in_progress`. This command is session bookkeeping only: after reporting the session path, stop. Do not create plans, edit phase target files, run implementation verification, or continue into implementation in the same turn. A separate explicit user request after the start result is required before implementation.
+
+`$wily-run <id>` records or attaches a Wily session, writes a Custom Workflow request/result artifact pair, and routes the active agent through `custom-workflow-skillset:plan-goal-runner`. If the generated execution package allows parallel lanes, route those bounded lanes through `custom-workflow-skillset:parallel-lane-runner`. The Custom Workflow result must be written to `custom-workflow-result.md` before `$wily-complete` or `$wily-block`.
 
 `$wily-complete <id>` marks a phase `done` after verification evidence and review requirements are satisfied.
 
@@ -100,6 +103,8 @@ Each project owns this local state:
   sessions/
     <timestamp>-phase-<id>-attempt-<n>/
       input.md
+      custom-workflow-request.md
+      custom-workflow-result.md
       result.md
       verification.md
       changed-files.md
@@ -110,7 +115,7 @@ Each project owns this local state:
 
 In collaborative repositories, track durable project state (`roadmap.yaml`, `project.md`, `decisions.md`, `status.md`, `phases/**`, `revisions/**`) and keep active `.wily/sessions/**` local unless an explicit archive policy says otherwise.
 
-External workflows such as Custom Workflow may be used by reference. Wily can prepare a phase handoff with `$wily-run`, but Wily does not bundle or execute those workflows. The external workflow contract is documented in `references/runner-adapter-contract.md`.
+Custom Workflow Skillset may be used as Wily's phase execution engine. Wily prepares the routing request with `$wily-run`, the active agent invokes the installed Custom Workflow skills, and Wily consumes the resulting `custom-workflow-result.md` during `$wily-complete` or `$wily-block`. The routing contract is documented in `references/runner-adapter-contract.md`.
 
 Phase IDs may be sequential (`01`, `02`, `03`) or grouped (`04-1`, `04-2`, `04-3`) to show related work that can run in parallel after shared dependencies finish.
 

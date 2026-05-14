@@ -159,18 +159,21 @@ class WilyCommandSkillsTest(unittest.TestCase):
         self.assertIn("Run the `wily-update` skill", command)
         self.assertIn("scripts/wily.py update", command)
 
-    def test_wily_run_documents_external_workflow_handoff_without_completion(self) -> None:
+    def test_wily_run_routes_to_custom_workflow_skillset_without_completion(self) -> None:
         skill = (ROOT / "skills" / "wily-run" / "SKILL.md").read_text(encoding="utf-8")
         command = (ROOT / "commands" / "run.md").read_text(encoding="utf-8")
 
-        self.assertIn("$wily-run <phase-id> [--runner <external-workflow-id>]", skill)
-        self.assertIn("reference-only external workflow handoff", skill)
-        self.assertIn("does not execute Custom Workflow", skill)
+        self.assertIn("$wily-run <phase-id> [--runner custom-workflow]", skill)
+        self.assertIn("custom-workflow-skillset:plan-goal-runner", skill)
+        self.assertIn("custom-workflow-skillset:parallel-lane-runner", skill)
+        self.assertIn("custom-workflow-result.md", skill)
+        self.assertIn("route into Custom Workflow Skillset", skill)
         self.assertIn("does not require bundled runner files", skill)
         self.assertNotIn("bundled default", skill)
         self.assertNotIn("runners/custom-workflow", skill)
         self.assertIn("Run the `wily-run` skill", command)
-        self.assertIn("reference-only external workflow handoff", command)
+        self.assertIn("Custom Workflow Skillset", command)
+        self.assertIn("custom-workflow-skillset:plan-goal-runner", command)
 
     def test_readme_documents_repo_local_zsh_launcher(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

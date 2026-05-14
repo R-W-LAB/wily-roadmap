@@ -1,27 +1,42 @@
-# External Workflow Reference
+# Custom Workflow Skillset Routing
 
 Wily Roadmap owns durable roadmap memory, phase lifecycle, dependency checks, attempts, status transitions, replans, and completion history.
 
-External workflows such as Custom Workflow may execute a selected phase, but they are not bundled into Wily and are not required for core Wily behavior. Wily uses them by reference only.
+Custom Workflow Skillset executes selected Wily phases. Wily does not bundle the Custom Workflow implementation files; it routes the active Codex agent to the installed `custom-workflow-skillset` plugin by skill name and receives the execution result through explicit artifacts.
 
-## Handoff Contract
+## Routing Contract
 
-`$wily-run` creates a reference-only external workflow handoff with:
+`$wily-run` creates a Custom Workflow request with:
 
 - phase id and title
 - phase path and phase files
 - roadmap context
 - current Wily session path
-- selected external workflow label
+- selected workflow engine
 - autonomy mode label
 - suggested native `/goal` command
+- result target path
 - completion, review, and blocker instructions
 
-The handoff is written to `agent-handoffs/` for external workflow use and copied into the active Wily session for audit history.
+The request is written to `agent-handoffs/<phase-slug>-custom-workflow-request.md` and copied into `.wily/sessions/<session>/custom-workflow-request.md` for audit history.
 
-## External Workflow Output
+## Required Custom Workflow Skills
 
-An external workflow may produce:
+The active agent must route execution through:
+
+- `custom-workflow-skillset:plan-goal-runner` for the phase execution package and native `/goal` contract.
+- `custom-workflow-skillset:parallel-lane-runner` only when the execution package returns `PARALLEL_SAFE` or `PARALLEL_SAFE_WITH_LIMITS`.
+
+Custom Workflow owns phase implementation planning, progress tracking, bounded lane execution, and verification evidence. Wily owns phase lifecycle and final status transitions.
+
+## Result Contract
+
+Custom Workflow writes its result to:
+
+- `agent-handoffs/<phase-slug>-custom-workflow-result.md`
+- `.wily/sessions/<session>/custom-workflow-result.md`
+
+The result should include:
 
 - result summary
 - verification evidence
@@ -31,7 +46,7 @@ An external workflow may produce:
 - recommended phase status: `needs_review`, `blocked`, `ready`, or `done`
 - raw artifacts useful for audit
 
-The external workflow must not mark Wily phases done directly. Final completion still requires Wily verification evidence and `$wily-complete`.
+Custom Workflow must not mark Wily phases done directly. Final completion still requires Wily verification evidence and `$wily-complete`. If blocked, use `$wily-block`.
 
 ## Autonomy Modes
 
@@ -60,8 +75,9 @@ Do not inherit an external workflow's more permissive default unchanged.
 
 ## Policy
 
-- Use Custom Workflow and similar systems as external references only.
 - Do not bundle external workflow implementation files inside Wily.
+- Route to the installed Custom Workflow Skillset plugin by explicit skill names.
+- Copy Custom Workflow results back into Wily session artifacts before completion or block.
 - Do not require hooks, MCP servers, or app integrations for core Wily behavior.
 - Remote and destructive actions remain approval-first.
 - Preserve current plugin discovery compatibility through `.codex-plugin/plugin.json` and top-level `skills/`.

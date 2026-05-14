@@ -128,15 +128,16 @@ class ReferenceOnlyWorkflowTest(unittest.TestCase):
     def test_custom_workflow_bundle_is_not_part_of_live_plugin(self) -> None:
         self.assertFalse((ROOT / "runners" / "custom-workflow").exists())
 
-    def test_workflow_guidance_treats_custom_workflow_as_external_reference(self) -> None:
+    def test_workflow_guidance_routes_to_custom_workflow_skillset(self) -> None:
         workflow = (ROOT / "skills" / "wily-workflow" / "SKILL.md").read_text(encoding="utf-8")
         reference = (
             ROOT / "skills" / "wily-workflow" / "references" / "runner-adapter-contract.md"
         ).read_text(encoding="utf-8")
 
         combined = workflow + "\n" + reference
-        self.assertIn("external workflow", combined)
-        self.assertIn("reference-only", combined)
+        self.assertIn("custom-workflow-skillset:plan-goal-runner", combined)
+        self.assertIn("custom-workflow-skillset:parallel-lane-runner", combined)
+        self.assertIn("custom-workflow-result.md", combined)
         self.assertNotIn("bundled default runner", combined)
         self.assertNotIn("runners/custom-workflow/runner.yaml", combined)
 
@@ -485,7 +486,7 @@ class WilyCliTest(unittest.TestCase):
             self.assertNotIn("Phase 흐름:", result.stdout)
             self.assertNotIn("Repo: ", result.stdout)
 
-    def test_run_creates_external_workflow_handoff_without_bundled_runner(self) -> None:
+    def test_run_creates_custom_workflow_skillset_request_without_bundled_runner(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
@@ -493,10 +494,12 @@ class WilyCliTest(unittest.TestCase):
             result = self.run_wily(project, "run", "01", "--runner", "custom-workflow")
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Prepared phase 01 for external workflow", result.stdout)
-            self.assertIn("Workflow: custom-workflow", result.stdout)
-            self.assertIn("Reference-only handoff:", result.stdout)
+            self.assertIn("Prepared phase 01 for Custom Workflow Skillset", result.stdout)
+            self.assertIn("Workflow engine: custom-workflow-skillset", result.stdout)
+            self.assertIn("Custom Workflow request:", result.stdout)
+            self.assertIn("Result target:", result.stdout)
             self.assertIn("Native goal command:", result.stdout)
+            self.assertIn("custom-workflow-skillset:plan-goal-runner", result.stdout)
             self.assertIn("/goal Execute Wily phase 01", result.stdout)
 
             roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
@@ -505,10 +508,20 @@ class WilyCliTest(unittest.TestCase):
             session = next((project / ".wily" / "sessions").glob("*phase-01-attempt-1"))
             status = (session / "status.yaml").read_text(encoding="utf-8")
             self.assertIn('status: "started"', status)
-            self.assertNotIn("runner:", status)
+            self.assertIn('workflow_engine: "custom-workflow-skillset"', status)
             self.assertFalse((session / "runner").exists())
-            self.assertTrue((session / "external-workflow-handoff.md").is_file())
-            self.assertTrue((project / "agent-handoffs" / "01-first-phase-external-workflow.md").is_file())
+            request = session / "custom-workflow-request.md"
+            result_target = session / "custom-workflow-result.md"
+            external_request = project / "agent-handoffs" / "01-first-phase-custom-workflow-request.md"
+            external_result = project / "agent-handoffs" / "01-first-phase-custom-workflow-result.md"
+            self.assertTrue(request.is_file())
+            self.assertTrue(result_target.is_file())
+            self.assertTrue(external_request.is_file())
+            self.assertTrue(external_result.is_file())
+            request_text = request.read_text(encoding="utf-8")
+            self.assertIn("custom-workflow-skillset:plan-goal-runner", request_text)
+            self.assertIn("custom-workflow-skillset:parallel-lane-runner", request_text)
+            self.assertIn("custom-workflow-result.md", request_text)
 
     def test_run_keeps_runner_and_autonomy_flags_as_external_workflow_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -518,12 +531,13 @@ class WilyCliTest(unittest.TestCase):
             result = self.run_wily(project, "run", "01", "--runner", "custom-workflow", "--autonomy", "conservative")
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Workflow: custom-workflow", result.stdout)
+            self.assertIn("Workflow engine: custom-workflow-skillset", result.stdout)
             self.assertIn("Autonomy: conservative", result.stdout)
             session = next((project / ".wily" / "sessions").glob("*phase-01-attempt-1"))
-            handoff = (session / "external-workflow-handoff.md").read_text(encoding="utf-8")
-            self.assertIn("- External workflow: `custom-workflow`", handoff)
-            self.assertIn("- Autonomy mode: `conservative`", handoff)
+            request = (session / "custom-workflow-request.md").read_text(encoding="utf-8")
+            self.assertIn("- Workflow engine: `custom-workflow-skillset`", request)
+            self.assertIn("- Runner alias: `custom-workflow`", request)
+            self.assertIn("- Autonomy mode: `conservative`", request)
 
     def test_run_rejects_non_executable_phase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -544,11 +558,11 @@ class WilyCliTest(unittest.TestCase):
             result = self.run_wily(project, "run", "02")
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Prepared phase 02 for external workflow", result.stdout)
+            self.assertIn("Prepared phase 02 for Custom Workflow Skillset", result.stdout)
             roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
             self.assertIn('id: "02"', roadmap)
             self.assertIn('status: "in_progress"', roadmap)
-            self.assertTrue((project / "agent-handoffs" / "02-unblocked-phase-external-workflow.md").is_file())
+            self.assertTrue((project / "agent-handoffs" / "02-unblocked-phase-custom-workflow-request.md").is_file())
 
     def test_run_attaches_existing_in_progress_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -560,7 +574,49 @@ class WilyCliTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(list((project / ".wily" / "sessions").glob("*phase-01-attempt-*"))), 1)
-            self.assertIn("Prepared phase 01 for external workflow", result.stdout)
+            self.assertIn("Prepared phase 01 for Custom Workflow Skillset", result.stdout)
+
+    def test_complete_snapshots_custom_workflow_result_into_session_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            run = self.run_wily(project, "run", "01")
+            self.assertEqual(run.returncode, 0, run.stderr)
+            session = next((project / ".wily" / "sessions").glob("*phase-01-attempt-1"))
+            external_result = project / "agent-handoffs" / "01-first-phase-custom-workflow-result.md"
+            external_result.write_text(
+                "\n".join(
+                    [
+                        "# Custom Workflow Result",
+                        "",
+                        "Recommended Wily status: done",
+                        "",
+                        "Verification: python3 -m unittest passed.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily(project, "complete", "01")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Completed phase 01", result.stdout)
+            self.assertIn("Recommended Wily status: done", (session / "result.md").read_text(encoding="utf-8"))
+            self.assertIn("python3 -m unittest passed", (session / "custom-workflow-result.md").read_text(encoding="utf-8"))
+
+    def test_complete_ignores_pending_custom_workflow_result_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            run = self.run_wily(project, "run", "01")
+            self.assertEqual(run.returncode, 0, run.stderr)
+            session = next((project / ".wily" / "sessions").glob("*phase-01-attempt-1"))
+
+            result = self.run_wily(project, "complete", "01")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual("# Result\n\nPending.\n", (session / "result.md").read_text(encoding="utf-8"))
 
     def test_watch_ascii_ui_does_not_print_rich_install_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
