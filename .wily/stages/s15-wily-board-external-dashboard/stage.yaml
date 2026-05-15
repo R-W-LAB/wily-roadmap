@@ -93,4 +93,4 @@ phases:
     preferred: "manual"
     autonomy_mode: "goal_scoped"
     current_session: "sessions/2026-05-15-150609-phase-15-7-attempt-1"
-    blocker: "Workflow draft PRs are open; waiting for Azure SSH access plus GitHub OAuth App and GitHub App credentials before secrets, live backfill, and PR-writing verification"
+    blocker: "Workflow PRs are merged and secrets are configured; waiting for Azure SSH access plus GitHub OAuth App and GitHub App credentials before live backfill and PR-writing verification"
