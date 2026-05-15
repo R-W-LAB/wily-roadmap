@@ -120,7 +120,7 @@ stages:
   - id: "s15"
     title: "Wily Board external dashboard implementation"
     path: "stages/s15-wily-board-external-dashboard"
-    status: "blocked"
+    status: "done"
     depends_on: ["s14"]
     execution_mode: "decomposed"
     decomposition_status: "applied"

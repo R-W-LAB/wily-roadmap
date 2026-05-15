@@ -83,7 +83,7 @@ phases:
   - id: "15-7"
     title: "Multi-repo onboarding and operating checklist"
     path: "phases/15-7-multi-repo-onboarding-ops"
-    status: "blocked"
+    status: "done"
     depends_on: ["15-4", "15-5", "15-6"]
     parallel_group: "15"
     owner: "codex"
@@ -92,4 +92,3 @@ phases:
     preferred: "manual"
     autonomy_mode: "goal_scoped"
     current_session: "sessions/2026-05-15-150609-phase-15-7-attempt-1"
-    blocker: "Live deploy, OAuth, GitHub App credentials, preflight, and signed webhook backfill are working. Remaining smoke gap: run a real board PR-write action against an appropriate Wily state branch; mac2win and BounceBall have no .wily/roadmap.yaml on default branch."

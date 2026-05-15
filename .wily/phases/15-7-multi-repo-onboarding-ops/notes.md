@@ -11,4 +11,4 @@ This is the first phase that should touch multiple existing repositories, so app
 - `deploy/preflight.sh` returns `wily-board preflight ok`.
 - Live signed webhook sync succeeds for `R-W-LAB/wily-roadmap` and `R-W-LAB/Digit`.
 - `R-W-LAB/mac2win` and `R-W-LAB/BounceBall` are registered but have no `.wily/roadmap.yaml` on the default branch, so sync returns `false`.
-- Remaining smoke gap: run a real board PR-write action against a branch that contains the target Wily Stage/Phase state.
+- Live board PR-write smoke created `R-W-LAB/wily-roadmap#3` as `app/rnw-board`, base `codex/wily-board-stage15`, head `wily-board/wily-roadmap-15-7-20260515131404`; the smoke PR was closed after verification and the head branch was deleted.

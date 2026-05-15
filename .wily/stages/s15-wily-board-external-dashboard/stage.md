@@ -8,4 +8,4 @@
 - 15-4 Wily sync webhook, parser, and backfill [done]
 - 15-5 GitHub PR writer and phase status toggle [done]
 - 15-6 Board UI views, htmx interactions, and mobile layout [done]
-- 15-7 Multi-repo onboarding and operating checklist [blocked]
+- 15-7 Multi-repo onboarding and operating checklist [done]
