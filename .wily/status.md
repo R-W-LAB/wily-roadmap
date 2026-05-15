@@ -6,13 +6,15 @@ Current baseline:
 - `R-W-LAB/wily-board` exists as a private repository and has the local FastAPI/SQLite/htmx implementation pushed.
 - Child Phases 15-1 through 15-6 are implemented. Phase 15-2 is now deployed on the Azure VM via SSH port 5679.
 - Live board health is up: `https://rnwlab.duckdns.org/healthz` returns `{"ok":true}` and `/` redirects to `/auth/github/start`.
-- `R-W-LAB/wily-board` now includes `docs/OPERATIONS.md` and `deploy/preflight.sh` covering deploy, credentials, service health, logs, and remaining blockers.
+- `R-W-LAB/wily-board` now includes `docs/OPERATIONS.md`, `deploy/preflight.sh`, and GitHub App token based private repo sync.
 - Child Phase 15-7 merged workflow PRs for all four initial repositories and configured `WILY_BOARD_URL` plus `WILY_BOARD_SECRET` secrets.
-- Stage s15 remains blocked because GitHub App credentials are still missing; server preflight currently stops at `GITHUB_APP_ID`.
+- Server `deploy/preflight.sh` returns `wily-board preflight ok`.
+- Live signed webhook sync succeeds for `R-W-LAB/wily-roadmap` and `R-W-LAB/Digit`; `R-W-LAB/mac2win` and `R-W-LAB/BounceBall` are registered but have no `.wily/roadmap.yaml` on the default branch.
+- Stage s15 remains blocked only on a real board PR-write smoke against an appropriate Wily state branch.
 - Stage s14 is done; child Phase 14-2 remains superseded by user request.
 
 Next action:
-- Provide GitHub App credentials before PR-writing verification; OAuth client ID/secret are already configured on the server.
+- Run the final PR-write smoke from the board against a branch that contains the target Stage/Phase state.
 - Workflow PRs are merged on default branches:
   - `R-W-LAB/wily-roadmap#2`
   - `R-W-LAB/Digit#4`

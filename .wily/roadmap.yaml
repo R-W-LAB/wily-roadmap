@@ -127,4 +127,4 @@ stages:
     owner: "codex"
     task: "prepare and implement a separate lightweight Wily Board web dashboard from docs/wily-board-plan.md"
     current_session: "sessions/2026-05-15-150637-phase-15-2-attempt-2"
-    blocker: "Live Wily Board is deployed at https://rnwlab.duckdns.org and healthz passes. GitHub OAuth client ID/secret are configured, but GitHub App credentials are still missing; preflight stops at GITHUB_APP_ID."
+    blocker: "Live deploy, OAuth, GitHub App credentials, preflight, and signed webhook backfill are working. Remaining smoke gap: run a real board PR-write action against an appropriate Wily state branch; mac2win and BounceBall have no .wily/roadmap.yaml on default branch."
