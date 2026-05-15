@@ -13,6 +13,7 @@ Stage-level acceptance:
 Current evidence:
 
 - `R-W-LAB/wily-board` commit `458036d` fixes Python package discovery and includes runtime SQL/template/static assets in the deployable wheel.
+- `R-W-LAB/wily-board` commit `d54845e` records the live SSH port and makes `deploy/install.sh` preserve the active/custom SSH port in UFW.
 - `uv run pytest -q` in `wily-board` passes: 20 tests.
 - Azure VM deployment on `airman@20.17.177.129:5679` completed with systemd `wily-board` active and Caddy active.
 - `curl -fsS https://rnwlab.duckdns.org/healthz` returns `{"ok":true}`.
