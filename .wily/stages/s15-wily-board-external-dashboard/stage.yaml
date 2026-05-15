@@ -83,7 +83,7 @@ phases:
   - id: "15-7"
     title: "Multi-repo onboarding and operating checklist"
     path: "phases/15-7-multi-repo-onboarding-ops"
-    status: "blocked"
+    status: "needs_review"
     depends_on: ["15-4", "15-5", "15-6"]
     parallel_group: "15"
     owner: "codex"
