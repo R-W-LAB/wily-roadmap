@@ -1,8 +1,8 @@
 # Handoff
 
-Stage s21 is pending behind Stage s22.
+Stage s21 is now ready and decomposed. Stage s22 is complete, so the redesign can consume the final live activity model rather than guessing around it.
 
-Do not start the UI redesign until the realtime activity heartbeat work is implemented. The redesign depends on the live model from Stage s22:
+The redesign depends on the live model from Stage s22:
 
 - `live_items` with session-scoped attach behavior
 - local-only Stage/Phase entries before push
@@ -17,4 +17,9 @@ Start by reviewing the current Wily Board UI and the Stage s16-s20 behavior alre
 - critical path and risk view
 - simple personal/shared visibility
 
-The first implementation tranche should improve Board scanability without changing the source-of-truth model or adding new integration layers.
+The first implementation tranche is 21-1. It should reconcile the design spec with the current `wily-board` codebase before any broad implementation:
+
+- The design moves from htmx/Jinja to Next.js. Treat this as the new s21 direction.
+- The design removes Board mutation controls. Remove routes/forms only at cutover, and preserve any GitHub App token code still needed for GitHub sync.
+- Lock the SSE path and deployment/proxy shape before downstream frontend work.
+- Keep durable `.wily` Git state visually distinct from provisional local live overlays.

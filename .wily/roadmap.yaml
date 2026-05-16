@@ -1,4 +1,4 @@
-roadmap_version: 22
+roadmap_version: 24
 roadmap_schema: "stage-v1"
 goal: "wily roadmap 플러그인을 다듬는 중이야."
 stages:
@@ -188,11 +188,11 @@ stages:
     title: "Wily Board UI redesign"
     path: "stages/s21-wily-board-ui-redesign"
     status: "pending"
-    depends_on: ["s22"]
+    depends_on: ["s23"]
     execution_mode: "decomposed"
-    decomposition_status: "pending"
+    decomposition_status: "applied"
     owner: "codex"
-    task: "redesign the Board information architecture and interface after realtime local activity and heartbeat support are available"
+    task: "redesign Wily Board into a read-only multi-repo personal work dashboard using the Stage s22 live activity model, with FastAPI JSON/SSE backend support and a Next.js frontend cutover plan"
 
   - id: "s22"
     title: "Wily Roadmap realtime activity heartbeat"
@@ -204,3 +204,13 @@ stages:
     owner: "codex"
     task: "first harden the Stage/Phase Watch contract, then show local Wily Stage and Phase activity in wily-watch and Wily Board with session-scoped heartbeat, token-zero worked events, local-only overlays, and durable sync attach"
     current_session: "sessions/2026-05-16-164935-phase-22-7-attempt-1"
+
+  - id: "s23"
+    title: "Wily Board live draft topology overlay"
+    path: "stages/s23-wily-board-live-draft-topology-overlay"
+    status: "done"
+    depends_on: ["s22"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "show local Stage decomposition topology on Wily Board before commit and push by emitting signed draft events, rendering provisional child phases, and clearing drafts after durable GitHub sync"

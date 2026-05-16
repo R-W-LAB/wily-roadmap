@@ -789,6 +789,147 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn('id: "api-lane"', stage_text)
             self.assertIn('write_scope: ["src/api"]', stage_text)
 
+    def test_decompose_stage_from_json_emits_board_live_draft_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_stage_roadmap(project)
+            proposal = project / "decomposition.json"
+            proposal.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "s01-custom",
+                            "title": "Custom user-authored phase",
+                            "status": "pending",
+                            "depends_on": [],
+                            "owner": "codex",
+                            "task": "split the work",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            emitted: list[tuple[dict, str, str, str]] = []
+
+            def record_event(root: Path, item: dict, event: str, live_status: str, note: str = "") -> bool:
+                emitted.append((item, event, live_status, note))
+                return True
+
+            stdout = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                    "WILY_BOARD_AGENT": "codex",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event), patch("sys.stdout", stdout):
+                result = wily.command_decompose_stage(project, ["s01-mvp0", "--from-json", str(proposal)])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(len(emitted), 1)
+            payload, event, live_status, note = emitted[0]
+            self.assertEqual(event, "stage_decomposed_local")
+            self.assertEqual(live_status, "active")
+            self.assertEqual(note, "")
+            self.assertEqual(payload["draft_kind"], "stage_decomposition")
+            self.assertEqual(payload["item_type"], "stage")
+            self.assertEqual(payload["item_id"], "s01-mvp0")
+            self.assertEqual(payload["stage_id"], "s01-mvp0")
+            self.assertEqual(payload["agent"], "codex")
+            self.assertEqual(payload["phases"][0]["id"], "s01-custom")
+            self.assertEqual(payload["phases"][0]["task"], "split the work")
+            self.assertIn("Board live draft sent for s01-mvp0: 1 phases", stdout.getvalue())
+
+    def test_decompose_stage_from_json_warns_when_board_live_config_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_stage_roadmap(project)
+            proposal = project / "decomposition.json"
+            proposal.write_text(
+                json.dumps([{"id": "s01-custom", "title": "Custom user-authored phase"}]),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch("sys.stderr", stderr), patch.object(
+                wily, "emit_board_live_event"
+            ) as emit:
+                result = wily.command_decompose_stage(project, ["s01-mvp0", "--from-json", str(proposal)])
+
+            self.assertEqual(result, 0)
+            emit.assert_not_called()
+            self.assertIn("Board live draft not sent: missing Wily Board live config", stderr.getvalue())
+
+    def test_decompose_stage_from_json_warns_when_board_live_draft_send_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_stage_roadmap(project)
+            proposal = project / "decomposition.json"
+            proposal.write_text(
+                json.dumps([{"id": "s01-custom", "title": "Custom user-authored phase"}]),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", return_value=False), patch("sys.stderr", stderr):
+                result = wily.command_decompose_stage(project, ["s01-mvp0", "--from-json", str(proposal)])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board live draft failed for s01-mvp0", stderr.getvalue())
+
+    def test_decompose_stage_from_json_rejects_empty_decomposition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_stage_roadmap(project)
+            proposal = project / "decomposition.json"
+            proposal.write_text("[]", encoding="utf-8")
+
+            result = self.run_wily(project, "decompose-stage", "s01-mvp0", "--from-json", str(proposal))
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Invalid decomposition JSON: expected at least one phase.", result.stderr)
+            self.assertFalse((project / ".wily" / "stages" / "s01-mvp0" / "stage.yaml").exists())
+
+    def test_decompose_stage_from_json_reports_board_http_failure_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_stage_roadmap(project)
+            proposal = project / "decomposition.json"
+            proposal.write_text(
+                json.dumps([{"id": "s01-custom", "title": "Custom user-authored phase"}]),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", return_value=(False, "HTTP 401")), patch("sys.stderr", stderr):
+                result = wily.command_decompose_stage(project, ["s01-mvp0", "--from-json", str(proposal)])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board live draft failed for s01-mvp0", stderr.getvalue())
+            self.assertIn("HTTP 401", stderr.getvalue())
+
     def test_status_reads_decomposed_phase_counts_from_stage_local_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)

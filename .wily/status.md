@@ -1,6 +1,6 @@
 # Wily Status
 
-Roadmap version 22 is complete through Stage s20, with Stage s22 ready and Stage s21 deferred behind it.
+Roadmap version 24 is complete through Stage s20, Stage s22, and Stage s23. Stage s21 is now the next decomposed Stage.
 
 Current baseline:
 - Stage s15 is complete. `R-W-LAB/wily-board` exists as a separate FastAPI/SQLite/htmx dashboard and is deployed at `https://rnwlab.duckdns.org`.
@@ -14,8 +14,9 @@ Current baseline:
 - Stage s18 is implemented and verified: Board shows claim conflict warnings, a Needs follow-up queue, and repository sync health.
 - Stage s19 is implemented and verified: Board shows deterministic Attention risk items for blockers, dependency bottlenecks, stale work, awaiting-push risk, and unclaimed ready work.
 - Stage s20 is implemented and verified: shared repos are visible to `airmang` and `Julirsia`, while personal repos are visible only to `visible_to`; `All`, `Shared`, and `Mine` filters are available.
-- Stage s22 is ready and decomposed: first patch the Wily plugin so Watch renders decomposed work as a Stage separator/header with child Phase rows, does not group `s22` under a Stage 18 dependency layer, and does not let a ready decomposed Stage silently appear without child Phases; then implement realtime Wily Roadmap activity so local Stage/Phase work appears in `wily-watch` and Wily Board with session-scoped heartbeat, token-zero `worked` events, local-only overlays, and durable sync attach.
-- Stage s21 is deferred: redesign the Wily Board UI after Stage s22 provides the live activity foundation the UI needs to render correctly.
+- Stage s22 is implemented and verified: local Stage/Phase work appears in `wily-watch` and Wily Board with session-scoped heartbeat, token-zero `worked` events, local-only overlays, and durable sync attach.
+- Stage s23 is implemented and verified: local Stage decomposition now emits live draft topology, Wily Board stores it as provisional `live_drafts`, renders draft child phases before push, and clears drafts after durable GitHub sync.
+- Stage s21 is ready and decomposed: redesign the Wily Board into a read-only multi-repo personal work dashboard using the Stage s22/s23 live activity model, FastAPI JSON/SSE APIs, and a Next.js frontend cutover.
 
 Next action:
-- Start Stage s22 Phase 22-1 to harden the Stage/Phase Watch contract, then continue with realtime activity implementation from `docs/superpowers/plans/2026-05-16-wily-board-local-activity-heartbeat.md`.
+- Start Phase 21-1 to reconcile the redesign contract with the current `R-W-LAB/wily-board` codebase and write the implementation plan.

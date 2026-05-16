@@ -77,7 +77,7 @@ def _board_config_file_values(path: Path) -> dict[str, str]:
     return values
 
 
-def board_live_config(root: Path | None = None) -> dict[str, str] | None:
+def board_live_config_values(root: Path | None = None) -> dict[str, str]:
     values: dict[str, str] = {}
     user_config = Path(os.environ.get("WILY_BOARD_USER_CONFIG", str(Path.home() / ".wily" / "board.json")))
     values.update(_board_config_file_values(user_config))
@@ -87,10 +87,20 @@ def board_live_config(root: Path | None = None) -> dict[str, str] | None:
         env_value = os.environ.get(name, "").strip()
         if env_value:
             values[name] = env_value
+    return values
+
+
+def board_live_config(root: Path | None = None) -> dict[str, str] | None:
+    values = board_live_config_values(root)
     if not all(values.get(name, "") for name in BOARD_LIVE_ENV):
         return None
     values.setdefault("WILY_BOARD_AGENT", "codex")
     return values
+
+
+def missing_board_live_config_keys(root: Path | None = None) -> list[str]:
+    values = board_live_config_values(root)
+    return [name for name in BOARD_LIVE_ENV if not values.get(name, "")]
 
 
 def board_live_enabled(root: Path | None = None) -> bool:
@@ -102,16 +112,19 @@ def board_live_signature(secret: str, body: bytes) -> str:
     return f"sha256={digest}"
 
 
+BoardLiveEventResult = tuple[bool, str]
+
+
 def emit_board_live_event(
     root: Path,
     phase: Phase,
     event: str,
     live_status: str,
     note: str = "",
-) -> None:
+) -> BoardLiveEventResult:
     config = board_live_config(root)
     if config is None:
-        return
+        return False, "missing config"
     item_id = str(phase.get("item_id") or phase.get("phase_id") or phase.get("id", ""))
     item_type = str(phase.get("item_type") or ("stage" if item_id.startswith("s") else "phase"))
     phase_id = str(phase.get("phase_id") or (item_id if item_type == "phase" else ""))
@@ -130,6 +143,9 @@ def emit_board_live_event(
         "note": note,
         "client_time": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
+    for key in ("current_item_id", "draft_kind", "phases", "worked"):
+        if key in phase:
+            payload[key] = phase[key]
     if not payload["phase_id"]:
         payload.pop("phase_id")
     if not payload["session_id"]:
@@ -146,9 +162,13 @@ def emit_board_live_event(
     )
     try:
         with urllib.request.urlopen(request, timeout=2):
-            pass
-    except (OSError, urllib.error.URLError, urllib.error.HTTPError):
-        return
+            return True, ""
+    except urllib.error.HTTPError as exc:
+        return False, f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return False, f"network error: {exc.reason}"
+    except OSError as exc:
+        return False, f"network error: {exc}"
 
 
 def fetch_board_live_claims(phase: Phase) -> list[dict[str, Any]]:
@@ -292,6 +312,33 @@ def live_registry_payload(
     if not stage_id:
         payload.pop("stage_id")
     return payload
+
+
+def live_draft_stage_decomposition_payload(root: Path, stage: Stage, phases: list[Phase]) -> Phase:
+    stage_id = str(stage.get("id", ""))
+    normalized_phases: list[dict[str, Any]] = []
+    for phase in phases:
+        normalized_phases.append(
+            {
+                "id": str(phase.get("id", "")),
+                "title": str(phase.get("title", "")),
+                "status": str(phase.get("status", "pending")),
+                "depends_on": [str(value) for value in phase.get("depends_on") or []],
+                "owner": str(phase.get("owner") or stage.get("owner") or ""),
+                "task": str(phase.get("task") or ""),
+                "path": str(phase.get("path") or ""),
+            }
+        )
+    return {
+        "id": stage_id,
+        "item_type": "stage",
+        "item_id": stage_id,
+        "stage_id": stage_id,
+        "draft_kind": "stage_decomposition",
+        "session_id": new_live_session_id(),
+        "agent": live_agent(root),
+        "phases": normalized_phases,
+    }
 
 
 def read_live_registry(path: Path) -> dict[str, Any] | None:
@@ -2005,6 +2052,8 @@ def stage_decomposition_from_json(path: Path) -> tuple[list[Phase], str | None]:
         return [], f"Invalid decomposition JSON: {exc}"
     if not isinstance(loaded, list):
         return [], "Invalid decomposition JSON: expected a list of phases."
+    if not loaded:
+        return [], "Invalid decomposition JSON: expected at least one phase."
     phases: list[Phase] = []
     for index, item in enumerate(loaded, start=1):
         if not isinstance(item, dict):
@@ -2071,6 +2120,26 @@ def write_decomposed_stage_phase_files(root: Path, stage: Stage, phases: list[Ph
         (folder / "notes.md").write_text("# Notes\n\nCreated by stage decomposition.\n", encoding="utf-8")
 
 
+def emit_stage_decomposition_live_draft(root: Path, stage: Stage, phases: list[Phase]) -> None:
+    stage_id = str(stage.get("id", "unknown"))
+    if not board_live_enabled(root):
+        missing = ", ".join(missing_board_live_config_keys(root))
+        print(
+            f"Board live draft not sent: missing Wily Board live config ({missing}).",
+            file=sys.stderr,
+        )
+        return
+    draft_payload = live_draft_stage_decomposition_payload(root, stage, phases)
+    result = emit_board_live_event(root, draft_payload, "stage_decomposed_local", "active")
+    ok = result[0] if isinstance(result, tuple) else bool(result)
+    detail = result[1] if isinstance(result, tuple) and len(result) > 1 else ""
+    if ok:
+        print(f"Board live draft sent for {stage_id}: {len(phases)} phases")
+    else:
+        suffix = f" ({detail})" if detail else ""
+        print(f"Board live draft failed for {stage_id}: Wily Board event was not stored{suffix}.", file=sys.stderr)
+
+
 def command_decompose_stage(root: Path, args: list[str]) -> int:
     stage_id = require_phase_id(args, "decompose-stage")
     if not stage_id:
@@ -2107,6 +2176,7 @@ def command_decompose_stage(root: Path, args: list[str]) -> int:
             stage.pop("phases", None)
             write_decomposed_stage_phase_files(root, stage, phases)
             save_roadmap(root, roadmap)
+            emit_stage_decomposition_live_draft(root, stage, phases)
             print(f"Decomposed stage {stage_id}")
             print(f"Stage path: {state_dir(root) / str(stage.get('path'))}")
         return 0
@@ -2116,6 +2186,7 @@ def command_decompose_stage(root: Path, args: list[str]) -> int:
     stage.pop("phases", None)
     write_decomposed_stage_phase_files(root, stage, phases)
     save_roadmap(root, roadmap)
+    emit_stage_decomposition_live_draft(root, stage, phases)
     print(f"Decomposed stage {stage_id}")
     print(f"Stage path: {state_dir(root) / str(stage.get('path'))}")
     return 0
