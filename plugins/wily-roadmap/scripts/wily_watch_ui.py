@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,9 @@ RAIL_ASCII = {
 CHROME_ROWS = 5
 MIN_WIDTH_ONELINE = 24
 MIN_WIDTH_RAIL = 28
+LOCAL_LIVE_FRESH_SECONDS = 120
+LOCAL_LIVE_STALE_SECONDS = 300
+LOCAL_LIVE_WORK_SECONDS = 90
 
 
 @dataclass
@@ -87,6 +92,7 @@ class _RoadmapView:
     ready: list[Phase] = field(default_factory=list)
     by_id: dict[str, Phase] = field(default_factory=dict)
     is_stage_mode: bool = False
+    live_items: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def version(self) -> Any:
@@ -107,9 +113,10 @@ class _RoadmapView:
 
 def _load(root: Path) -> _RoadmapView:
     state_dir = root / ".wily"
+    live_items = _load_local_live_items(root)
     roadmap_path = state_dir / "roadmap.yaml"
     if not roadmap_path.exists():
-        return _RoadmapView(root=root, has_state=state_dir.exists(), roadmap=None)
+        return _RoadmapView(root=root, has_state=state_dir.exists(), roadmap=None, live_items=live_items)
 
     roadmap = wily_state_summary.parse_roadmap(wily_state_summary.read_text(roadmap_path))
     stages = roadmap.get("stages") or []
@@ -126,6 +133,99 @@ def _load(root: Path) -> _RoadmapView:
         ready=ready,
         by_id=_phase_index(phases),
         is_stage_mode=is_stage_mode,
+        live_items=live_items,
+    )
+
+
+def _parse_live_time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _live_activity_state(item: dict[str, Any], *, now: datetime) -> str:
+    last_seen = _parse_live_time(
+        item.get("last_seen_at") or item.get("updated_at") or item.get("started_at")
+    )
+    last_worked = _parse_live_time(item.get("last_worked_at"))
+    if last_seen is not None:
+        seen_age = max(0, int((now - last_seen).total_seconds()))
+        if seen_age > LOCAL_LIVE_STALE_SECONDS:
+            return "stale"
+        if last_worked is not None:
+            work_age = max(0, int((now - last_worked).total_seconds()))
+            if work_age <= LOCAL_LIVE_WORK_SECONDS:
+                return "working"
+        if seen_age <= LOCAL_LIVE_FRESH_SECONDS:
+            return "active"
+        return "idle"
+    if last_worked is not None:
+        work_age = max(0, int((now - last_worked).total_seconds()))
+        return "working" if work_age <= LOCAL_LIVE_WORK_SECONDS else "idle"
+    return "active"
+
+
+def _normalize_live_item(payload: dict[str, Any], source: Path, *, now: datetime) -> dict[str, Any] | None:
+    item_id = str(
+        payload.get("current_item_id")
+        or payload.get("item_id")
+        or payload.get("phase_id")
+        or payload.get("stage_id")
+        or ""
+    ).strip()
+    if not item_id:
+        return None
+    item_type = str(payload.get("item_type") or ("phase" if payload.get("phase_id") else "stage"))
+    agent = str(payload.get("agent") or "agent").strip()
+    actor = str(payload.get("actor") or "").strip()
+    label = f"{agent} {_live_activity_state(payload, now=now)}"
+    if actor:
+        label = f"{agent} {_live_activity_state(payload, now=now)}"
+    return {
+        **payload,
+        "item_type": item_type,
+        "item_id": item_id,
+        "phase_id": str(payload.get("phase_id") or (item_id if item_type == "phase" else "")),
+        "stage_id": str(payload.get("stage_id") or (item_id if item_type == "stage" else "")),
+        "agent": agent,
+        "actor": actor,
+        "activity_state": _live_activity_state(payload, now=now),
+        "label": label,
+        "source": str(source),
+    }
+
+
+def _load_local_live_items(root: Path) -> list[dict[str, Any]]:
+    active_dir = root / ".wily" / "local" / "live" / "active"
+    if not active_dir.exists():
+        return []
+    now = datetime.now(timezone.utc)
+    items: list[dict[str, Any]] = []
+    for path in sorted(active_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        item = _normalize_live_item(payload, path, now=now)
+        if item is not None:
+            items.append(item)
+    state_order = {"working": 0, "active": 1, "idle": 2, "stale": 3}
+    return sorted(
+        items,
+        key=lambda item: (
+            state_order.get(str(item.get("activity_state")), 9),
+            str(item.get("item_id")),
+            str(item.get("agent")),
+            str(item.get("actor")),
+        ),
     )
 
 
@@ -195,7 +295,34 @@ def _phase_index(phases: list[Phase]) -> dict[str, Phase]:
     return {str(phase.get("id", "?")): phase for phase in phases}
 
 
-def _ordered_stages(phases: list[Phase]) -> list[list[Phase]]:
+def _topological_stage_order(stages: list[Phase]) -> list[Phase]:
+    by_id = {str(stage.get("id", "?")): stage for stage in stages}
+    pending = list(stages)
+    ordered: list[Phase] = []
+    emitted: set[str] = set()
+
+    while pending:
+        progressed = False
+        next_pending: list[Phase] = []
+        for stage in pending:
+            dependencies = [str(dep) for dep in stage.get("depends_on") or [] if str(dep) in by_id]
+            if all(dep in emitted for dep in dependencies):
+                ordered.append(stage)
+                emitted.add(str(stage.get("id", "?")))
+                progressed = True
+            else:
+                next_pending.append(stage)
+        if not progressed:
+            ordered.extend(next_pending)
+            break
+        pending = next_pending
+
+    return ordered
+
+
+def _ordered_stages(phases: list[Phase], *, stage_mode: bool = False) -> list[list[Phase]]:
+    if stage_mode:
+        return [[stage] for stage in _topological_stage_order(phases)]
     grouped = wily_state_summary.stage_groups(phases)
     return [grouped[stage] for stage in sorted(grouped)]
 
@@ -236,6 +363,17 @@ def _stage_header(num: int, count: int, width: int, ascii_: bool) -> Line:
     label = f" Stage {num}"
     if count > 1:
         label += " - parallel" if ascii_ else " · parallel"
+    fill = "-" if ascii_ else "─"
+    text = f"{label} "
+    if len(text) < width:
+        text += fill * (width - len(text))
+    return _crop_line([(text, "dim")], width)
+
+
+def _stage_unit_header(stage: Phase, width: int, ascii_: bool) -> Line:
+    stage_id = str(stage.get("id", "?"))
+    match = re.match(r"s0*(\d+)", stage_id)
+    label = f" Stage {int(match.group(1))}" if match else f" Stage {stage_id}"
     fill = "-" if ascii_ else "─"
     text = f"{label} "
     if len(text) < width:
@@ -311,6 +449,104 @@ def _phase_assignment_detail(phase: Phase) -> str:
     if task:
         parts.append(f"task {task}")
     return "   ".join(parts)
+
+
+def _phase_item_ids(phase: Phase) -> set[str]:
+    ids = {str(phase.get("id", "?"))}
+    for key in ("phase_id", "stage_id"):
+        value = phase.get(key)
+        if value:
+            ids.add(str(value))
+    return ids
+
+
+def _known_item_ids(phases: list[Phase]) -> set[str]:
+    known: set[str] = set()
+    for phase in phases:
+        known.update(_phase_item_ids(phase))
+        children = phase.get("phases") or []
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    known.update(_phase_item_ids(child))
+    return known
+
+
+def _live_detail_for_phase(live_items: list[dict[str, Any]], phase: Phase) -> str:
+    if not live_items:
+        return ""
+    ids = _phase_item_ids(phase)
+    labels = [
+        str(item.get("label"))
+        for item in live_items
+        if str(item.get("item_id")) in ids
+        or str(item.get("phase_id") or "") in ids
+        or (
+            str(item.get("item_type")) == "stage"
+            and str(item.get("stage_id") or "") in ids
+        )
+    ]
+    if not labels:
+        return ""
+    return "live " + ", ".join(labels)
+
+
+def _local_live_header(width: int, ascii_: bool) -> Line:
+    fill = "-" if ascii_ else "─"
+    text = " Local activity "
+    if len(text) < width:
+        text += fill * (width - len(text))
+    return _crop_line([(text, "dim")], width)
+
+
+def _local_live_line(item: dict[str, Any], *, width: int, ascii_: bool) -> Line:
+    glyphs = GLYPHS_ASCII if ascii_ else GLYPHS
+    state = str(item.get("activity_state") or "active")
+    status = {
+        "working": "in_progress",
+        "active": "ready",
+        "idle": "pending",
+        "stale": "superseded",
+    }.get(state, "pending")
+    glyph = glyphs.get(status, glyphs["pending"])
+    style = STYLES.get(status, "")
+    item_id = str(item.get("item_id") or "?")
+    item_type = str(item.get("item_type") or "item")
+    label = str(item.get("label") or state)
+    text = f" {glyph} {item_id}  {item_type}   live {label}"
+    return _crop_line([(text, style)], width)
+
+
+def _local_only_live_lines(
+    live_items: list[dict[str, Any]],
+    known_ids: set[str],
+    *,
+    width: int,
+    ascii_: bool,
+) -> tuple[list[Line], list[str]]:
+    def matches_known(item: dict[str, Any]) -> bool:
+        item_type = str(item.get("item_type") or "")
+        if str(item.get("item_id")) in known_ids:
+            return True
+        if item_type == "phase" and str(item.get("phase_id") or "") in known_ids:
+            return True
+        if item_type == "stage" and str(item.get("stage_id") or "") in known_ids:
+            return True
+        return False
+
+    local_only = [
+        item
+        for item in live_items
+        if not matches_known(item)
+    ]
+    if not local_only:
+        return [], []
+    lines = [_local_live_header(width, ascii_)]
+    kinds = ["live-header"]
+    for item in local_only:
+        lines.append(_local_live_line(item, width=width, ascii_=ascii_))
+        kinds.append("live-node")
+    return lines, kinds
 
 
 def _crop_line(line: Line, width: int) -> Line:
@@ -405,6 +641,7 @@ def _node_line(
     dependency_ids: list[str] | None = None,
     dependency_marker: str | None = None,
     runner_detail: str = "",
+    live_detail: str = "",
 ) -> Line:
     status = _phase_status(phase, ready_ids)
     glyphs = GLYPHS_ASCII if ascii_ else GLYPHS
@@ -421,11 +658,18 @@ def _node_line(
     child_phases = phase.get("phases") or []
     if child_phases:
         detail_parts.extend(_stage_phase_detail_parts(child_phases))
+    elif phase.get("execution_mode") == "decomposed":
+        if phase.get("decomposition_status") == "applied":
+            detail_parts.append("missing child phases")
+        else:
+            detail_parts.append("needs decomposition")
     assignment_detail = _phase_assignment_detail(phase)
     if assignment_detail:
         detail_parts.append(assignment_detail)
     if runner_detail:
         detail_parts.append(runner_detail)
+    if live_detail:
+        detail_parts.append(live_detail)
     detail_text = f"   {'   '.join(detail_parts)}" if detail_parts else ""
 
     fixed_width = _display_width(prefix) + _display_width(glyph) + _display_width(id_text)
@@ -457,14 +701,18 @@ def _flat_lines2(
     ascii_: bool,
     root: Path | None = None,
     stage_mode: bool = False,
+    live_items: list[dict[str, Any]] | None = None,
 ) -> tuple[list[Line], list[str]]:
     by_id = _phase_index(phases)
     id_width = _id_width(phases)
     lines: list[Line] = []
     kinds: list[str] = []
 
-    for num, stage in enumerate(_ordered_stages(phases), start=1):
-        if not stage_mode:
+    for num, stage in enumerate(_ordered_stages(phases, stage_mode=stage_mode), start=1):
+        if stage_mode:
+            lines.append(_stage_unit_header(stage[0], width, ascii_))
+            kinds.append("header")
+        else:
             lines.append(_stage_header(num, len(stage), width, ascii_))
             kinds.append("header")
         for phase in stage:
@@ -478,12 +726,27 @@ def _flat_lines2(
                     width=width,
                     ascii_=ascii_,
                     runner_detail=_runner_status_detail(root, phase),
+                    live_detail=_live_detail_for_phase(live_items or [], phase),
                 )
             )
             kinds.append("done" if phase.get("status") == "done" else "node")
-            child_lines, child_kinds = _child_phase_lines(phase, width=width, ascii_=ascii_)
+            child_lines, child_kinds = _child_phase_lines(
+                phase,
+                width=width,
+                ascii_=ascii_,
+                live_items=live_items or [],
+            )
             lines.extend(child_lines)
             kinds.extend(child_kinds)
+
+    local_lines, local_kinds = _local_only_live_lines(
+        live_items or [],
+        _known_item_ids(phases),
+        width=width,
+        ascii_=ascii_,
+    )
+    lines.extend(local_lines)
+    kinds.extend(local_kinds)
 
     return lines, kinds
 
@@ -501,11 +764,12 @@ def _graph_lines2(
     ascii_: bool,
     root: Path | None = None,
     stage_mode: bool = False,
+    live_items: list[dict[str, Any]] | None = None,
 ) -> tuple[list[Line], list[str]]:
     rails = RAIL_ASCII if ascii_ else RAIL
     by_id = _phase_index(phases)
     id_width = _id_width(phases)
-    stages = _ordered_stages(phases)
+    stages = _ordered_stages(phases, stage_mode=stage_mode)
     lines: list[Line] = []
     kinds: list[str] = []
     previous_wide = False
@@ -539,13 +803,28 @@ def _graph_lines2(
                     dependency_ids=dependency_ids,
                     dependency_marker=dependency_marker,
                     runner_detail=_runner_status_detail(root, phase),
+                    live_detail=_live_detail_for_phase(live_items or [], phase),
                 )
             )
             kinds.append("done" if phase.get("status") == "done" else "node")
-            child_lines, child_kinds = _child_phase_lines(phase, width=width, ascii_=ascii_)
+            child_lines, child_kinds = _child_phase_lines(
+                phase,
+                width=width,
+                ascii_=ascii_,
+                live_items=live_items or [],
+            )
             lines.extend(child_lines)
             kinds.extend(child_kinds)
         previous_wide = stage_wide
+
+    local_lines, local_kinds = _local_only_live_lines(
+        live_items or [],
+        _known_item_ids(phases),
+        width=width,
+        ascii_=ascii_,
+    )
+    lines.extend(local_lines)
+    kinds.extend(local_kinds)
 
     return lines, kinds
 
@@ -609,7 +888,13 @@ def _child_prefix(rails: dict[str, str], *, last: bool) -> str:
     return f"   {glyph} "
 
 
-def _child_phase_lines(stage: Phase, *, width: int, ascii_: bool) -> tuple[list[Line], list[str]]:
+def _child_phase_lines(
+    stage: Phase,
+    *,
+    width: int,
+    ascii_: bool,
+    live_items: list[dict[str, Any]] | None = None,
+) -> tuple[list[Line], list[str]]:
     children = stage.get("phases") or []
     if not children or not isinstance(children, list):
         return [], []
@@ -632,6 +917,7 @@ def _child_phase_lines(stage: Phase, *, width: int, ascii_: bool) -> tuple[list[
                 id_width=id_width,
                 width=width,
                 ascii_=ascii_,
+                live_detail=_live_detail_for_phase(live_items or [], child),
             )
         )
         kinds.append("child-done" if child.get("status") == "done" else "child-node")
@@ -708,10 +994,24 @@ def _preserve_unfinished_lines(lines: list[Line], kinds: list[str]) -> tuple[lis
         return lines, kinds
     kept_lines = [lines[0]]
     kept_kinds = [kinds[0]]
-    for line, kind in zip(lines[1:], kinds[1:]):
+    index = 1
+    while index < len(lines):
+        line = lines[index]
+        kind = kinds[index]
+        if kind == "header":
+            next_header = index + 1
+            while next_header < len(kinds) and kinds[next_header] != "header":
+                next_header += 1
+            stage_kinds = kinds[index + 1 : next_header]
+            if any(stage_kind in {"node", "child-node"} for stage_kind in stage_kinds):
+                kept_lines.append(line)
+                kept_kinds.append(kind)
+            index += 1
+            continue
         if kind in {"node", "child-node"}:
             kept_lines.append(line)
             kept_kinds.append(kind)
+        index += 1
     return kept_lines, kept_kinds
 
 
@@ -772,7 +1072,7 @@ def _compact_frontier_lines(
     max_rows: int,
     ascii_: bool,
 ) -> list[Line]:
-    stages = _ordered_stages(view.phases)
+    stages = _ordered_stages(view.phases, stage_mode=view.is_stage_mode)
     frontier_index = _frontier_stage_index(stages, view.ready_ids)
     if frontier_index is None:
         return []
@@ -794,7 +1094,10 @@ def _compact_frontier_lines(
         kinds.append("done")
 
     frontier = stages[frontier_index]
-    if not view.is_stage_mode:
+    if view.is_stage_mode:
+        lines.append(_stage_unit_header(frontier[0], width, ascii_))
+        kinds.append("frontier-header")
+    else:
         lines.append(_stage_header(frontier_index + 1, len(frontier), width, ascii_))
         kinds.append("frontier-header")
     for phase in frontier:
@@ -808,11 +1111,17 @@ def _compact_frontier_lines(
                 width=width,
                 ascii_=ascii_,
                 runner_detail=_runner_status_detail(view.root, phase),
+                live_detail=_live_detail_for_phase(view.live_items, phase),
             )
         )
         kinds.append("frontier-node")
         if view.is_stage_mode:
-            child_lines, child_kinds = _frontier_child_lines(phase, width=width, ascii_=ascii_)
+            child_lines, child_kinds = _frontier_child_lines(
+                phase,
+                width=width,
+                ascii_=ascii_,
+                live_items=view.live_items,
+            )
             lines.extend(child_lines)
             kinds.extend(child_kinds)
 
@@ -823,7 +1132,13 @@ def _compact_frontier_lines(
     return _trim_frontier_compact_lines(lines, kinds, max_rows)
 
 
-def _frontier_child_lines(stage: Phase, *, width: int, ascii_: bool) -> tuple[list[Line], list[str]]:
+def _frontier_child_lines(
+    stage: Phase,
+    *,
+    width: int,
+    ascii_: bool,
+    live_items: list[dict[str, Any]] | None = None,
+) -> tuple[list[Line], list[str]]:
     children = stage.get("phases") or []
     if not children or not isinstance(children, list):
         return [], []
@@ -847,6 +1162,7 @@ def _frontier_child_lines(stage: Phase, *, width: int, ascii_: bool) -> tuple[li
         id_width=id_width,
         width=width,
         ascii_=ascii_,
+        live_detail=_live_detail_for_phase(live_items or [], frontier),
     )
     return [line], ["frontier-child"]
 
@@ -870,7 +1186,7 @@ def _body_lines(
     if not view.phases:
         return [[(" (no phases yet)", "dim")]]
 
-    if _pipeline_renderable(view.phases) and width >= MIN_WIDTH_RAIL:
+    if not view.is_stage_mode and _pipeline_renderable(view.phases) and width >= MIN_WIDTH_RAIL:
         lines, kinds = _graph_lines2(
             view.phases,
             view.ready_ids,
@@ -878,6 +1194,7 @@ def _body_lines(
             ascii_=ascii_,
             root=view.root,
             stage_mode=view.is_stage_mode,
+            live_items=view.live_items,
         )
     else:
         lines, kinds = _flat_lines2(
@@ -887,6 +1204,7 @@ def _body_lines(
             ascii_=ascii_,
             root=view.root,
             stage_mode=view.is_stage_mode,
+            live_items=view.live_items,
         )
 
     if not expand_done and max_rows is not None and len(lines) > max_rows:

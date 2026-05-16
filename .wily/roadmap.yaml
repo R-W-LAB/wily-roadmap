@@ -1,4 +1,4 @@
-roadmap_version: 16
+roadmap_version: 22
 roadmap_schema: "stage-v1"
 goal: "wily roadmap 플러그인을 다듬는 중이야."
 stages:
@@ -128,3 +128,79 @@ stages:
     task: "prepare and implement a separate lightweight Wily Board web dashboard from docs/wily-board-plan.md"
     current_session: "sessions/2026-05-15-150637-phase-15-2-attempt-2"
     blocker: "Live deploy, OAuth, GitHub App credentials, preflight, and signed webhook backfill are working. Remaining smoke gap: run a real board PR-write action against an appropriate Wily state branch; mac2win and BounceBall have no .wily/roadmap.yaml on default branch."
+
+  - id: "s16"
+    title: "Wily Board live local work overlay"
+    path: "stages/s16-wily-board-live-local-work-overlay"
+    status: "done"
+    depends_on: ["s15"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "show push-before-local Wily work activity on Board as provisional live overlay while keeping committed .wily state authoritative"
+    current_session: "sessions/2026-05-16-114413-phase-16-4-attempt-1"
+
+  - id: "s17"
+    title: "Wily Board heartbeat freshness and stale presence"
+    path: "stages/s17-wily-board-heartbeat-freshness"
+    status: "done"
+    depends_on: ["s16"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "add lightweight live heartbeat so Board can show active now, last seen, and stale local sessions without LLM token usage"
+    current_session: "sessions/2026-05-16-131037-phase-17-4-attempt-1"
+
+  - id: "s18"
+    title: "Wily Board collaboration operating surface"
+    path: "stages/s18-wily-board-collaboration-ops"
+    status: "done"
+    depends_on: ["s17"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "add conflict warnings, review/awaiting-push queue, and sync health panels so Board becomes a practical collaboration control surface"
+    current_session: "sessions/2026-05-16-132817-phase-18-4-attempt-1"
+
+  - id: "s19"
+    title: "Wily Board critical path and risk view"
+    path: "stages/s19-wily-board-critical-path-risk-view"
+    status: "done"
+    depends_on: ["s18"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "surface blockers, dependency bottlenecks, stale work, awaiting-push risk, and unclaimed ready work so Board helps decide what needs attention next"
+    current_session: "sessions/2026-05-16-133600-phase-19-4-attempt-1"
+
+  - id: "s20"
+    title: "Wily Board simple personal and shared repo visibility"
+    path: "stages/s20-wily-board-simple-personal-shared-visibility"
+    status: "done"
+    depends_on: ["s16"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "separate shared collaboration repos from airmang personal repos with simple visibility fields and login-scoped filtering for two-user operation"
+    current_session: "sessions/2026-05-16-134453-phase-20-4-attempt-1"
+
+  - id: "s21"
+    title: "Wily Board UI redesign"
+    path: "stages/s21-wily-board-ui-redesign"
+    status: "pending"
+    depends_on: ["s22"]
+    execution_mode: "decomposed"
+    decomposition_status: "pending"
+    owner: "codex"
+    task: "redesign the Board information architecture and interface after realtime local activity and heartbeat support are available"
+
+  - id: "s22"
+    title: "Wily Roadmap realtime activity heartbeat"
+    path: "stages/s22-wily-roadmap-realtime-activity-heartbeat"
+    status: "done"
+    depends_on: ["s20"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "first harden the Stage/Phase Watch contract, then show local Wily Stage and Phase activity in wily-watch and Wily Board with session-scoped heartbeat, token-zero worked events, local-only overlays, and durable sync attach"
+    current_session: "sessions/2026-05-16-164935-phase-22-7-attempt-1"

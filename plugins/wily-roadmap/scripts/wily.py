@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import json
+import hmac
+import hashlib
 import os
 import re
+import secrets
 import select
 import shlex
 import shutil
@@ -14,7 +17,10 @@ import sys
 import termios
 import time
 import tty
-from datetime import datetime
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +41,452 @@ WATCH_MOUSE_WHEEL_DOWN = 65
 WATCH_MOUSE_ENABLE = "\033[?1000h\033[?1006h"
 WATCH_MOUSE_DISABLE = "\033[?1006l\033[?1000l"
 DEFAULT_UPDATE_REPOSITORY = "https://github.com/airmang/wily-roadmap"
+BOARD_LIVE_ENV = ("WILY_BOARD_URL", "WILY_BOARD_SECRET", "WILY_BOARD_REPO", "WILY_BOARD_ACTOR")
+BOARD_LIVE_OPTIONAL_ENV = ("WILY_BOARD_AGENT", "WILY_BOARD_HEARTBEAT", "WILY_BOARD_HEARTBEAT_INTERVAL")
 
 
 def state_dir(root: Path) -> Path:
     return root / ".wily"
+
+
+def _board_config_file_values(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    aliases = {
+        "url": "WILY_BOARD_URL",
+        "secret": "WILY_BOARD_SECRET",
+        "repo": "WILY_BOARD_REPO",
+        "actor": "WILY_BOARD_ACTOR",
+        "agent": "WILY_BOARD_AGENT",
+        "heartbeat": "WILY_BOARD_HEARTBEAT",
+        "heartbeat_interval": "WILY_BOARD_HEARTBEAT_INTERVAL",
+    }
+    values: dict[str, str] = {}
+    for key, value in payload.items():
+        env_key = key if str(key).startswith("WILY_BOARD_") else aliases.get(str(key))
+        if env_key:
+            values[env_key] = str(value).strip()
+    if not all(values.values()):
+        return values
+    return values
+
+
+def board_live_config(root: Path | None = None) -> dict[str, str] | None:
+    values: dict[str, str] = {}
+    user_config = Path(os.environ.get("WILY_BOARD_USER_CONFIG", str(Path.home() / ".wily" / "board.json")))
+    values.update(_board_config_file_values(user_config))
+    if root is not None:
+        values.update(_board_config_file_values(root / ".wily" / "local" / "board.json"))
+    for name in (*BOARD_LIVE_ENV, *BOARD_LIVE_OPTIONAL_ENV):
+        env_value = os.environ.get(name, "").strip()
+        if env_value:
+            values[name] = env_value
+    if not all(values.get(name, "") for name in BOARD_LIVE_ENV):
+        return None
+    values.setdefault("WILY_BOARD_AGENT", "codex")
+    return values
+
+
+def board_live_enabled(root: Path | None = None) -> bool:
+    return board_live_config(root) is not None
+
+
+def board_live_signature(secret: str, body: bytes) -> str:
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+def emit_board_live_event(
+    root: Path,
+    phase: Phase,
+    event: str,
+    live_status: str,
+    note: str = "",
+) -> None:
+    config = board_live_config(root)
+    if config is None:
+        return
+    item_id = str(phase.get("item_id") or phase.get("phase_id") or phase.get("id", ""))
+    item_type = str(phase.get("item_type") or ("stage" if item_id.startswith("s") else "phase"))
+    phase_id = str(phase.get("phase_id") or (item_id if item_type == "phase" else ""))
+    payload = {
+        "repo": config["WILY_BOARD_REPO"],
+        "item_type": item_type,
+        "item_id": item_id,
+        "phase_id": phase_id,
+        "stage_id": str(phase.get("stage_id", "") or (item_id if item_type == "stage" else "")),
+        "actor": config["WILY_BOARD_ACTOR"],
+        "agent": str(phase.get("agent") or config.get("WILY_BOARD_AGENT") or "codex"),
+        "event": event,
+        "live_status": live_status,
+        "session_id": str(phase.get("session_id", "")),
+        "session_path": str(phase.get("current_session", "")),
+        "note": note,
+        "client_time": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    if not payload["phase_id"]:
+        payload.pop("phase_id")
+    if not payload["session_id"]:
+        payload.pop("session_id")
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(
+        config["WILY_BOARD_URL"].rstrip("/") + "/api/live/events",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Wily-Signature": board_live_signature(config["WILY_BOARD_SECRET"], body),
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2):
+            pass
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError):
+        return
+
+
+def fetch_board_live_claims(phase: Phase) -> list[dict[str, Any]]:
+    config = board_live_config()
+    if config is None:
+        return []
+    query = urllib.parse.urlencode(
+        {
+            "repo": config["WILY_BOARD_REPO"],
+            "phase_id": str(phase.get("id", "")),
+            "actor": config["WILY_BOARD_ACTOR"],
+        }
+    )
+    request = urllib.request.Request(
+        config["WILY_BOARD_URL"].rstrip("/") + f"/api/live/claims?{query}",
+        method="GET",
+        headers={"X-Wily-Signature": board_live_signature(config["WILY_BOARD_SECRET"], b"")},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=0.25) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, json.JSONDecodeError, urllib.error.URLError, urllib.error.HTTPError):
+        return []
+    claims = payload.get("claims") if isinstance(payload, dict) else None
+    return claims if isinstance(claims, list) else []
+
+
+def warn_board_live_claims(phase: Phase) -> None:
+    claims = fetch_board_live_claims(phase)
+    if not claims:
+        return
+    labels = []
+    for claim in claims[:3]:
+        actor = str(claim.get("actor") or "someone")
+        last_seen = str(claim.get("last_seen_label") or "recently")
+        labels.append(f"{actor} ({last_seen})")
+    print(
+        "Board claim warning: another active local session is already on this phase: "
+        + ", ".join(labels),
+        file=sys.stderr,
+    )
+
+
+def utc_now_z() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def live_root(root: Path) -> Path:
+    return state_dir(root) / "local" / "live"
+
+
+def live_active_dir(root: Path) -> Path:
+    return live_root(root) / "active"
+
+
+def live_alive_path(root: Path, session_id: str) -> Path:
+    return live_root(root) / f"{session_id}.alive"
+
+
+def live_pid_path(root: Path, session_id: str) -> Path:
+    return live_root(root) / f"{session_id}.pid"
+
+
+def new_live_session_id() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"{stamp}-{os.getpid()}-{secrets.token_hex(4)}"
+
+
+def process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def live_actor(root: Path | None = None) -> str:
+    config = board_live_config(root)
+    if config is not None:
+        return config["WILY_BOARD_ACTOR"]
+    return os.environ.get("USER") or os.environ.get("USERNAME") or "local"
+
+
+def live_agent(root: Path | None = None) -> str:
+    config = board_live_config(root)
+    if config is not None:
+        return config.get("WILY_BOARD_AGENT", "codex")
+    return os.environ.get("WILY_BOARD_AGENT") or os.environ.get("WILY_AGENT") or "codex"
+
+
+def live_item_type(item: Phase) -> str:
+    item_id = str(item.get("item_id") or item.get("phase_id") or item.get("id", ""))
+    explicit = item.get("item_type")
+    if explicit:
+        return str(explicit)
+    return "stage" if item_id.startswith("s") and not item.get("phase_id") else "phase"
+
+
+def live_item_id(item: Phase) -> str:
+    return str(item.get("item_id") or item.get("phase_id") or item.get("id", ""))
+
+
+def live_registry_payload(
+    root: Path,
+    item: Phase,
+    *,
+    event: str,
+    live_status: str,
+    note: str = "",
+    session_id: str | None = None,
+    parent_shell_pid: int | None = None,
+) -> dict[str, Any]:
+    item_id = live_item_id(item)
+    item_type = live_item_type(item)
+    phase_id = str(item.get("phase_id") or (item_id if item_type == "phase" else ""))
+    stage_id = str(item.get("stage_id") or (item_id if item_type == "stage" else ""))
+    now = utc_now_z()
+    payload: dict[str, Any] = {
+        "session_id": session_id or new_live_session_id(),
+        "item_type": item_type,
+        "item_id": item_id,
+        "phase_id": phase_id,
+        "stage_id": stage_id,
+        "actor": live_actor(root),
+        "agent": str(item.get("agent") or live_agent(root)),
+        "event": event,
+        "live_status": live_status,
+        "session_path": str(item.get("current_session", "")),
+        "note": note,
+        "started_at": now,
+        "last_seen_at": now,
+    }
+    if event == "worked":
+        payload["last_worked_at"] = now
+    if parent_shell_pid:
+        payload["parent_shell_pid"] = parent_shell_pid
+    if not phase_id:
+        payload.pop("phase_id")
+    if not stage_id:
+        payload.pop("stage_id")
+    return payload
+
+
+def read_live_registry(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def active_live_registry_files(root: Path) -> list[Path]:
+    directory = live_active_dir(root)
+    if not directory.exists():
+        return []
+    return sorted(directory.glob("*.json"))
+
+
+def write_live_registry(
+    root: Path,
+    item: Phase,
+    *,
+    event: str,
+    live_status: str,
+    note: str = "",
+    session_id: str | None = None,
+    parent_shell_pid: int | None = None,
+) -> dict[str, Any]:
+    directory = live_active_dir(root)
+    directory.mkdir(parents=True, exist_ok=True)
+    live_root(root).mkdir(parents=True, exist_ok=True)
+    payload = live_registry_payload(
+        root,
+        item,
+        event=event,
+        live_status=live_status,
+        note=note,
+        session_id=session_id,
+        parent_shell_pid=parent_shell_pid,
+    )
+    path = directory / f"{payload['session_id']}.json"
+    existing = read_live_registry(path) if path.exists() else None
+    if existing:
+        payload["started_at"] = existing.get("started_at") or payload["started_at"]
+        if existing.get("last_worked_at") and event != "worked":
+            payload["last_worked_at"] = existing["last_worked_at"]
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    live_alive_path(root, str(payload["session_id"])).touch()
+    return payload
+
+
+def live_registry_matches(payload: dict[str, Any], item: Phase) -> bool:
+    if item.get("session_id") and str(payload.get("session_id", "")) == str(item.get("session_id")):
+        return True
+    item_id = live_item_id(item)
+    session_path = str(item.get("current_session", ""))
+    if session_path and str(payload.get("session_path", "")) == session_path:
+        return True
+    if str(payload.get("item_id", "")) == item_id:
+        return True
+    if item_id and str(payload.get("phase_id", "")) == item_id:
+        return True
+    return False
+
+
+def live_registries_for_item(root: Path, item: Phase) -> list[dict[str, Any]]:
+    registries = []
+    for path in active_live_registry_files(root):
+        payload = read_live_registry(path)
+        if payload and live_registry_matches(payload, item):
+            registries.append(payload)
+    return registries
+
+
+def remove_live_registry(root: Path, session_id: str) -> None:
+    for path in (
+        live_active_dir(root) / f"{session_id}.json",
+        live_alive_path(root, session_id),
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def recover_orphan_live_sessions(root: Path) -> None:
+    for path in active_live_registry_files(root):
+        payload = read_live_registry(path)
+        if not payload:
+            path.unlink(missing_ok=True)
+            continue
+        session_id = str(payload.get("session_id") or path.stem)
+        alive = live_alive_path(root, session_id)
+        pid_path = live_pid_path(root, session_id)
+        if not alive.exists():
+            path.unlink(missing_ok=True)
+            continue
+        if pid_path.exists():
+            try:
+                pid = int(pid_path.read_text(encoding="utf-8").strip())
+            except ValueError:
+                pid = 0
+            if pid and not process_alive(pid):
+                remove_live_registry(root, session_id)
+                pid_path.unlink(missing_ok=True)
+
+
+def heartbeat_enabled(root: Path) -> bool:
+    config = board_live_config(root) or {}
+    value = os.environ.get("WILY_BOARD_HEARTBEAT") or config.get("WILY_BOARD_HEARTBEAT", "")
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def heartbeat_interval(root: Path) -> str:
+    config = board_live_config(root) or {}
+    return os.environ.get("WILY_BOARD_HEARTBEAT_INTERVAL") or config.get("WILY_BOARD_HEARTBEAT_INTERVAL") or "30"
+
+
+def spawn_heartbeat_sidecar(root: Path, item: Phase, session_id: str) -> None:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "live-heartbeat",
+        live_item_id(item),
+        "--session",
+        session_id,
+        "--interval",
+        heartbeat_interval(root),
+        "--parent-shell-pid",
+        str(os.getppid()),
+    ]
+    subprocess.Popen(
+        command,
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def open_live_session(root: Path, item: Phase) -> dict[str, Any]:
+    recover_orphan_live_sessions(root)
+    return write_live_registry(root, item, event="start", live_status="claimed")
+
+
+def close_live_sessions(
+    root: Path,
+    item: Phase,
+    *,
+    event: str,
+    live_status: str,
+    note: str = "",
+) -> list[dict[str, Any]]:
+    registries = live_registries_for_item(root, item)
+    if not registries:
+        registries = [live_registry_payload(root, item, event=event, live_status=live_status, note=note)]
+    closed = []
+    for payload in registries:
+        payload = {**payload, "id": live_item_id(item), "event": event, "live_status": live_status}
+        if note:
+            payload["note"] = note
+        emit_board_live_event(root, payload, event, live_status, note)
+        session_id = str(payload.get("session_id", ""))
+        if session_id:
+            remove_live_registry(root, session_id)
+        closed.append(payload)
+    return closed
+
+
+def resolve_active_live_payload(
+    root: Path,
+    *,
+    item_id: str = "",
+    session_id: str = "",
+    agent: str = "",
+) -> dict[str, Any] | None:
+    candidates: list[tuple[float, dict[str, Any]]] = []
+    for path in active_live_registry_files(root):
+        payload = read_live_registry(path)
+        if not payload:
+            continue
+        if session_id and str(payload.get("session_id", "")) != session_id:
+            continue
+        if agent and not session_id and str(payload.get("agent", "")) != agent:
+            continue
+        if item_id and item_id not in {
+            str(payload.get("item_id", "")),
+            str(payload.get("phase_id", "")),
+            str(payload.get("stage_id", "")),
+        }:
+            continue
+        candidates.append((path.stat().st_mtime, payload))
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: item[0], reverse=True)[0][1]
 
 
 def write_once(path: Path, content: str) -> bool:
@@ -244,7 +692,9 @@ def active_stage_context(root: Path, roadmap: dict[str, Any]) -> tuple[Stage, Ph
 
 def command_next(root: Path) -> int:
     roadmap = load_roadmap(root)
-    ready_stages = wily_state_summary.executable_stages(roadmap.get("stages") or [])
+    stages = roadmap.get("stages") or []
+    enriched_stages = wily_state_summary.enrich_stages_with_local_state(root, stages) if stages else []
+    ready_stages = wily_state_summary.executable_stages(enriched_stages)
     stage = ready_stages[0] if ready_stages else None
     if stage:
         if len(ready_stages) > 1:
@@ -274,6 +724,20 @@ def command_next(root: Path) -> int:
             return 0
         folder = state_dir(root) / str(stage_path)
         print(f"Stage path: {folder}")
+        if stage.get("execution_mode") == "decomposed":
+            child_phases = stage.get("phases") or []
+            if child_phases:
+                ready_children = wily_state_summary.executable_phases(child_phases)
+                next_child = ready_children[0] if ready_children else None
+                if next_child:
+                    child_id = next_child.get("id", "unknown")
+                    child_title = next_child.get("title", "Untitled phase")
+                    print(f"Next phase: {child_id} - {child_title}")
+                    child_path = next_child.get("path")
+                    if child_path:
+                        print(f"Phase path: {state_dir(root) / str(child_path)}")
+            elif stage.get("decomposition_status") == "applied":
+                print("Decomposition warning: missing child phases")
         print()
         context = stage_context_bundle(str(stage_id), str(title), folder)
         print(context.strip())
@@ -293,6 +757,17 @@ def command_next(root: Path) -> int:
                 print(f"Active phase: {phase_id} - {phase_title}")
                 session = active_phase.get("current_session") or active_stage.get("current_session")
             else:
+                stage_state = load_stage_state(root, active_stage)
+                child_phases = stage_state.get("phases") or active_stage.get("phases") or []
+                ready_children = wily_state_summary.executable_phases(child_phases)
+                if ready_children:
+                    next_child = ready_children[0]
+                    child_id = next_child.get("id", "unknown")
+                    child_title = next_child.get("title", "Untitled phase")
+                    print(f"Next phase: {child_id} - {child_title}")
+                    child_path = next_child.get("path")
+                    if child_path:
+                        print(f"Phase path: {state_dir(root) / str(child_path)}")
                 session = active_stage.get("current_session")
             if session:
                 print(f"Session: {session}")
@@ -917,6 +1392,7 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
         found = find_stage_phase(root, roadmap, phase_id)
         if found:
             stage, phase, stage_state = found
+            warn_board_live_claims({**phase, "stage_id": stage.get("id", "")})
             attempt = next_attempt(root, phase_id)
             session = create_session(root, phase, attempt)
             phase["status"] = "in_progress"
@@ -926,6 +1402,12 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
             phase.pop("blocker", None)
             save_stage_state(root, stage, stage_state)
             save_roadmap(root, roadmap)
+            live_payload = open_live_session(root, {**phase, "stage_id": stage.get("id", "")})
+            event_payload = {**phase, **live_payload, "id": phase.get("id", phase_id), "stage_id": stage.get("id", "")}
+            if board_live_enabled(root):
+                emit_board_live_event(root, event_payload, "start", "claimed")
+            if heartbeat_enabled(root):
+                spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
             if retry:
                 print(f"Started phase {phase_id} attempt {attempt}")
             else:
@@ -936,12 +1418,19 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
         if not stage:
             print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
             return 1
+        warn_board_live_claims(stage)
         attempt = next_stage_attempt(root, phase_id)
         session = create_stage_session(root, stage, attempt)
         stage["status"] = "in_progress"
         stage["current_session"] = relative_session_path(root, session)
         stage.pop("blocker", None)
         save_roadmap(root, roadmap)
+        live_payload = open_live_session(root, stage)
+        event_payload = {**stage, **live_payload, "id": stage.get("id", phase_id)}
+        if board_live_enabled(root):
+            emit_board_live_event(root, event_payload, "start", "claimed")
+        if heartbeat_enabled(root):
+            spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
         if retry:
             print(f"Started stage {phase_id} attempt {attempt}")
         else:
@@ -949,6 +1438,7 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
         print(f"Session: {session}")
         return 0
 
+    warn_board_live_claims(phase)
     attempt = next_attempt(root, phase_id)
     session = create_session(root, phase, attempt)
     phase["status"] = "in_progress"
@@ -956,6 +1446,12 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
     if "blocker" in phase:
         del phase["blocker"]
     save_roadmap(root, roadmap)
+    live_payload = open_live_session(root, phase)
+    event_payload = {**phase, **live_payload, "id": phase.get("id", phase_id)}
+    if board_live_enabled(root):
+        emit_board_live_event(root, event_payload, "start", "claimed")
+    if heartbeat_enabled(root):
+        spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
 
     if retry:
         print(f"Started phase {phase_id} attempt {attempt}")
@@ -982,6 +1478,12 @@ def command_complete(root: Path, args: list[str]) -> int:
             update_session_status(root, phase, "verified")
             save_stage_state(root, stage, stage_state)
             save_roadmap(root, roadmap)
+            close_live_sessions(
+                root,
+                {**phase, "stage_id": stage.get("id", "")},
+                event="complete",
+                live_status="completed_local",
+            )
             print(f"Completed phase {phase_id}")
             return 0
         stage = find_stage(roadmap, phase_id)
@@ -992,6 +1494,7 @@ def command_complete(root: Path, args: list[str]) -> int:
         stage.pop("blocker", None)
         update_session_status(root, stage, "verified")
         save_roadmap(root, roadmap)
+        close_live_sessions(root, stage, event="complete", live_status="completed_local")
         print(f"Completed stage {phase_id}")
         return 0
     phase["status"] = "done"
@@ -999,6 +1502,7 @@ def command_complete(root: Path, args: list[str]) -> int:
     update_session_status(root, phase, "verified")
     snapshot_runner_session(root, phase, "done")
     save_roadmap(root, roadmap)
+    close_live_sessions(root, phase, event="complete", live_status="completed_local")
     print(f"Completed phase {phase_id}")
     return 0
 
@@ -1021,6 +1525,13 @@ def command_block(root: Path, args: list[str]) -> int:
             update_session_status(root, phase, "blocked", reason)
             save_stage_state(root, stage, stage_state)
             save_roadmap(root, roadmap)
+            close_live_sessions(
+                root,
+                {**phase, "stage_id": stage.get("id", "")},
+                event="block",
+                live_status="blocked_local",
+                note=reason,
+            )
             print(f"Blocked phase {phase_id}: {reason}")
             return 0
         stage = find_stage(roadmap, phase_id)
@@ -1031,6 +1542,7 @@ def command_block(root: Path, args: list[str]) -> int:
         stage["blocker"] = reason
         update_session_status(root, stage, "blocked", reason)
         save_roadmap(root, roadmap)
+        close_live_sessions(root, stage, event="block", live_status="blocked_local", note=reason)
         print(f"Blocked stage {phase_id}: {reason}")
         return 0
     phase["status"] = "blocked"
@@ -1038,7 +1550,362 @@ def command_block(root: Path, args: list[str]) -> int:
     update_session_status(root, phase, "blocked", reason)
     snapshot_runner_session(root, phase, "blocked")
     save_roadmap(root, roadmap)
+    close_live_sessions(root, phase, event="block", live_status="blocked_local", note=reason)
     print(f"Blocked phase {phase_id}: {reason}")
+    return 0
+
+
+def heartbeat_usage() -> str:
+    return (
+        "Usage: wily.py live-heartbeat <phase-id> [--interval seconds] [--count n] "
+        "[--note text] [--session id] [--parent-shell-pid pid] [--ttl seconds] [--foreground]"
+    )
+
+
+def resolve_live_phase(root: Path, roadmap: dict[str, Any], phase_id: str) -> Phase | None:
+    phase = find_phase(roadmap, phase_id)
+    if phase:
+        return phase
+    found = find_stage_phase(root, roadmap, phase_id)
+    if found:
+        stage, child_phase, _stage_state = found
+        return {**child_phase, "stage_id": stage.get("id", "")}
+    stage = find_stage(roadmap, phase_id)
+    if stage:
+        return stage
+    return None
+
+
+def command_live_heartbeat(root: Path, args: list[str]) -> int:
+    if not args:
+        print(heartbeat_usage(), file=sys.stderr)
+        return 2
+    if not board_live_enabled():
+        print(
+            "Board live heartbeat requires WILY_BOARD_URL, WILY_BOARD_SECRET, WILY_BOARD_REPO, and WILY_BOARD_ACTOR.",
+            file=sys.stderr,
+        )
+        return 1
+
+    phase_id = args[0]
+    interval = 15.0
+    count = 0
+    note = "active"
+    session_id = ""
+    parent_shell_pid = 0
+    ttl = 0.0
+    index = 1
+    while index < len(args):
+        option = args[index]
+        if option == "--interval" and index + 1 < len(args):
+            try:
+                interval = float(args[index + 1])
+            except ValueError:
+                print("Invalid --interval value", file=sys.stderr)
+                return 2
+            if interval < 0:
+                print("Invalid --interval value", file=sys.stderr)
+                return 2
+            index += 2
+            continue
+        if option == "--count" and index + 1 < len(args):
+            try:
+                count = int(args[index + 1])
+            except ValueError:
+                print("Invalid --count value", file=sys.stderr)
+                return 2
+            if count < 0:
+                print("Invalid --count value", file=sys.stderr)
+                return 2
+            index += 2
+            continue
+        if option == "--note" and index + 1 < len(args):
+            note = args[index + 1]
+            index += 2
+            continue
+        if option == "--session" and index + 1 < len(args):
+            session_id = args[index + 1]
+            index += 2
+            continue
+        if option == "--parent-shell-pid" and index + 1 < len(args):
+            try:
+                parent_shell_pid = int(args[index + 1])
+            except ValueError:
+                print("Invalid --parent-shell-pid value", file=sys.stderr)
+                return 2
+            index += 2
+            continue
+        if option == "--ttl" and index + 1 < len(args):
+            try:
+                ttl = float(args[index + 1])
+            except ValueError:
+                print("Invalid --ttl value", file=sys.stderr)
+                return 2
+            if ttl < 0:
+                print("Invalid --ttl value", file=sys.stderr)
+                return 2
+            index += 2
+            continue
+        if option == "--foreground":
+            index += 1
+            continue
+        print(heartbeat_usage(), file=sys.stderr)
+        return 2
+
+    roadmap = load_roadmap(root)
+    phase = resolve_live_phase(root, roadmap, phase_id)
+    if not phase:
+        print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
+        return 1
+
+    sent = 0
+    started = time.monotonic()
+    if session_id:
+        live_root(root).mkdir(parents=True, exist_ok=True)
+        live_pid_path(root, session_id).write_text(str(os.getpid()) + "\n", encoding="utf-8")
+    try:
+        while count == 0 or sent < count:
+            if parent_shell_pid and not process_alive(parent_shell_pid):
+                close_live_sessions(root, {**phase, "session_id": session_id}, event="release", live_status="released")
+                break
+            if session_id and not live_alive_path(root, session_id).exists():
+                close_live_sessions(root, {**phase, "session_id": session_id}, event="release", live_status="released")
+                break
+            if ttl and time.monotonic() - started >= ttl:
+                close_live_sessions(root, {**phase, "session_id": session_id}, event="release", live_status="released")
+                break
+            payload = write_live_registry(
+                root,
+                phase,
+                event="heartbeat",
+                live_status="active",
+                note=note,
+                session_id=session_id or None,
+                parent_shell_pid=parent_shell_pid or None,
+            )
+            emit_board_live_event(root, {**phase, **payload, "id": phase.get("id", phase_id)}, "heartbeat", "active", note)
+            sent += 1
+            if count and sent >= count:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print()
+
+    print(f"Heartbeat sent for {phase_id}: {sent}")
+    return 0
+
+
+def live_worked_usage() -> str:
+    return "Usage: wily.py live-worked [item-id] [--session id] [--agent name] [--tool name] [--summary text] [--from-hook]"
+
+
+def command_live_worked(root: Path, args: list[str]) -> int:
+    item_id = ""
+    session_id = ""
+    agent = ""
+    tool = ""
+    summary = ""
+    from_hook = False
+    index = 0
+    if args and not args[0].startswith("--"):
+        item_id = args[0]
+        index = 1
+    while index < len(args):
+        option = args[index]
+        if option == "--session" and index + 1 < len(args):
+            session_id = args[index + 1]
+            index += 2
+            continue
+        if option == "--agent" and index + 1 < len(args):
+            agent = args[index + 1]
+            index += 2
+            continue
+        if option == "--tool" and index + 1 < len(args):
+            tool = args[index + 1]
+            index += 2
+            continue
+        if option == "--summary" and index + 1 < len(args):
+            summary = args[index + 1]
+            index += 2
+            continue
+        if option == "--from-hook":
+            from_hook = True
+            index += 1
+            continue
+        print(live_worked_usage(), file=sys.stderr)
+        return 2
+
+    active = resolve_active_live_payload(root, item_id=item_id, session_id=session_id, agent=agent)
+    if active is None:
+        if from_hook:
+            return 0
+        print("No active Wily live session found.", file=sys.stderr)
+        return 1
+
+    session_id = str(active.get("session_id") or session_id)
+    item_id = item_id or str(active.get("item_id") or active.get("phase_id") or active.get("stage_id") or "")
+    roadmap = load_roadmap(root)
+    phase = resolve_live_phase(root, roadmap, item_id) or {
+        "id": item_id,
+        "item_id": item_id,
+        "item_type": active.get("item_type", "phase"),
+        "phase_id": active.get("phase_id", ""),
+        "stage_id": active.get("stage_id", ""),
+        "current_session": active.get("session_path", ""),
+    }
+    event_item = {
+        **phase,
+        "session_id": session_id,
+        "agent": agent or active.get("agent") or live_agent(root),
+        "tool": tool,
+        "summary": summary,
+    }
+    payload = write_live_registry(
+        root,
+        event_item,
+        event="worked",
+        live_status="active",
+        note=summary,
+        session_id=session_id,
+    )
+    if tool:
+        payload["tool"] = tool
+    if summary:
+        payload["summary"] = summary
+    path = live_active_dir(root) / f"{session_id}.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    emit_board_live_event(root, {**event_item, **payload, "id": phase.get("id", item_id)}, "worked", "active", summary)
+    print(f"Worked event sent for {item_id or session_id}")
+    return 0
+
+
+def command_release(root: Path, args: list[str]) -> int:
+    phase_id = require_phase_id(args, "release")
+    if not phase_id:
+        return 2
+    roadmap = load_roadmap(root)
+    phase = resolve_live_phase(root, roadmap, phase_id)
+    if not phase:
+        print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
+        return 1
+    close_live_sessions(root, phase, event="release", live_status="released")
+    print(f"Released live session for {phase_id}")
+    return 0
+
+
+def hook_command(target: str) -> str:
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} live-worked --from-hook --agent {shlex.quote(target)}"
+
+
+def command_hooks(root: Path, args: list[str]) -> int:
+    if not args or args[0] != "install":
+        print("Usage: wily.py hooks install --target codex|claude [--path file]", file=sys.stderr)
+        return 2
+    target = ""
+    path = None
+    index = 1
+    while index < len(args):
+        option = args[index]
+        if option == "--target" and index + 1 < len(args):
+            target = args[index + 1]
+            index += 2
+            continue
+        if option == "--path" and index + 1 < len(args):
+            path = Path(args[index + 1])
+            index += 2
+            continue
+        print("Usage: wily.py hooks install --target codex|claude [--path file]", file=sys.stderr)
+        return 2
+    if target not in {"codex", "claude"}:
+        print("--target must be codex or claude", file=sys.stderr)
+        return 2
+    if path is None:
+        path = Path.home() / (".codex/hooks.json" if target == "codex" else ".claude/settings.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    command = hook_command(target)
+    payload = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": command,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"Installed {target} hook: {path}")
+    return 0
+
+
+def codex_bridge_should_emit_worked(notification: dict[str, Any]) -> bool:
+    return str(notification.get("method") or "") in {"item/completed", "hook/completed"}
+
+
+def codex_bridge_tool_name(notification: dict[str, Any]) -> str:
+    params = notification.get("params")
+    item = params.get("item") if isinstance(params, dict) else None
+    if isinstance(item, dict):
+        return str(item.get("name") or item.get("type") or "codex-item")
+    return "codex-item"
+
+
+def command_codex_bridge(root: Path, args: list[str]) -> int:
+    session_id = ""
+    fixture = None
+    agent = "codex-desktop"
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option == "--session" and index + 1 < len(args):
+            session_id = args[index + 1]
+            index += 2
+            continue
+        if option == "--fixture" and index + 1 < len(args):
+            fixture = Path(args[index + 1])
+            index += 2
+            continue
+        if option == "--agent" and index + 1 < len(args):
+            agent = args[index + 1]
+            index += 2
+            continue
+        if option == "--once":
+            index += 1
+            continue
+        print("Usage: wily.py codex-bridge --session id [--fixture jsonl] [--once]", file=sys.stderr)
+        return 2
+    if not session_id:
+        print("--session is required", file=sys.stderr)
+        return 2
+    if fixture is None or not fixture.exists():
+        print("codex-bridge unavailable; live activity will remain heartbeat-only", file=sys.stderr)
+        return 0
+    for line in fixture.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            notification = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(notification, dict) or not codex_bridge_should_emit_worked(notification):
+            continue
+        command_live_worked(
+            root,
+            [
+                "--from-hook",
+                "--session",
+                session_id,
+                "--agent",
+                agent,
+                "--tool",
+                codex_bridge_tool_name(notification),
+            ],
+        )
     return 0
 
 
@@ -1866,6 +2733,11 @@ def usage() -> str:
             "  start <phase-id>",
             "  complete <phase-id>",
             "  block <phase-id> [reason]",
+            "  release <phase-id>",
+            "  live-heartbeat <phase-id> [--interval seconds] [--count n] [--note text]",
+            "  live-worked [item-id] [--session id] [--agent name] [--from-hook]",
+            "  hooks install --target codex|claude",
+            "  codex-bridge --session id [--fixture jsonl]",
             "  retry <phase-id>",
             "  replan [reason]",
             "  issues [--add-to-roadmap]",
@@ -1897,6 +2769,16 @@ def main(argv: list[str] | None = None) -> int:
         return command_complete(root, args)
     if command == "block":
         return command_block(root, args)
+    if command == "release":
+        return command_release(root, args)
+    if command == "live-heartbeat":
+        return command_live_heartbeat(root, args)
+    if command == "live-worked":
+        return command_live_worked(root, args)
+    if command == "hooks":
+        return command_hooks(root, args)
+    if command == "codex-bridge":
+        return command_codex_bridge(root, args)
     if command == "retry":
         return command_start(root, args, retry=True)
     if command == "replan":

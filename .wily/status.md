@@ -1,22 +1,21 @@
 # Wily Status
 
-Roadmap version 16 has Stage s15 complete.
+Roadmap version 22 is complete through Stage s20, with Stage s22 ready and Stage s21 deferred behind it.
 
 Current baseline:
-- `R-W-LAB/wily-board` exists as a private repository and has the local FastAPI/SQLite/htmx implementation pushed.
-- Child Phases 15-1 through 15-6 are implemented. Phase 15-2 is now deployed on the Azure VM via SSH port 5679.
-- Live board health is up: `https://rnwlab.duckdns.org/healthz` returns `{"ok":true}` and `/` redirects to `/auth/github/start`.
-- `R-W-LAB/wily-board` now includes `docs/OPERATIONS.md`, `deploy/preflight.sh`, GitHub App token based private repo sync, and server-side status PR actions exposed from phase cards.
-- Child Phase 15-7 merged workflow PRs for all four initial repositories and configured `WILY_BOARD_URL` plus `WILY_BOARD_SECRET` secrets.
-- Server `deploy/preflight.sh` returns `wily-board preflight ok`.
-- Live signed webhook sync succeeds for `R-W-LAB/wily-roadmap` and `R-W-LAB/Digit`; `R-W-LAB/mac2win` and `R-W-LAB/BounceBall` are registered but have no `.wily/roadmap.yaml` on the default branch.
-- Live board PR-write smoke created `R-W-LAB/wily-roadmap#3` as `app/rnw-board`, targeting `codex/wily-board-stage15`; the smoke PR was then closed and its head branch deleted.
-- Stage s14 is done; child Phase 14-2 remains superseded by user request.
+- Stage s15 is complete. `R-W-LAB/wily-board` exists as a separate FastAPI/SQLite/htmx dashboard and is deployed at `https://rnwlab.duckdns.org`.
+- Existing Board sync reads committed `.wily/roadmap.yaml` and `.wily/**/stage.yaml` from GitHub after push-triggered signed webhooks.
+- Stage s16 adds push-before-local work visibility as a provisional Board overlay while keeping committed `.wily` state authoritative.
+- Phase 16-1 is implemented and verified: Board now has `live_sessions` storage, signed `POST /api/live/events`, live event audit logging, and durable-sync clearing for matching `completed_local` and `blocked_local` overlays.
+- Phase 16-2 is implemented and verified: Board repo detail and Active right now views render provisional live chips without changing durable status/progress.
+- Phase 16-3 is implemented and verified: Wily CLI emits best-effort signed live events from start, block, and complete when opt-in Board config is present.
+- Phase 16-4 is implemented and verified: operations docs and a local HTTP smoke confirm CLI-to-Board live event delivery before push.
+- Stage s17 is implemented and verified: Wily CLI now supports lightweight `live-heartbeat`; Board classifies live sessions as fresh, recent, or stale; stale sessions remain visible on repo detail but no longer occupy Active right now or block Up next.
+- Stage s18 is implemented and verified: Board shows claim conflict warnings, a Needs follow-up queue, and repository sync health.
+- Stage s19 is implemented and verified: Board shows deterministic Attention risk items for blockers, dependency bottlenecks, stale work, awaiting-push risk, and unclaimed ready work.
+- Stage s20 is implemented and verified: shared repos are visible to `airmang` and `Julirsia`, while personal repos are visible only to `visible_to`; `All`, `Shared`, and `Mine` filters are available.
+- Stage s22 is ready and decomposed: first patch the Wily plugin so Watch renders decomposed work as a Stage separator/header with child Phase rows, does not group `s22` under a Stage 18 dependency layer, and does not let a ready decomposed Stage silently appear without child Phases; then implement realtime Wily Roadmap activity so local Stage/Phase work appears in `wily-watch` and Wily Board with session-scoped heartbeat, token-zero `worked` events, local-only overlays, and durable sync attach.
+- Stage s21 is deferred: redesign the Wily Board UI after Stage s22 provides the live activity foundation the UI needs to render correctly.
 
 Next action:
-- No Stage 15 implementation action remains.
-- Workflow PRs are merged on default branches:
-  - `R-W-LAB/wily-roadmap#2`
-  - `R-W-LAB/Digit#4`
-  - `R-W-LAB/mac2win#187`
-  - `R-W-LAB/BounceBall#55`
+- Start Stage s22 Phase 22-1 to harden the Stage/Phase Watch contract, then continue with realtime activity implementation from `docs/superpowers/plans/2026-05-16-wily-board-local-activity-heartbeat.md`.

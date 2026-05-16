@@ -3,11 +3,14 @@ from __future__ import annotations
 import os
 import re
 import json
+import io
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -641,6 +644,60 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn("Active phase: 14-2 - Mobile watch layout", result.stdout)
             self.assertIn("Session: sessions/active-phase", result.stdout)
 
+    def test_next_reports_ready_child_phase_for_active_decomposed_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            stage_dir = state / "stages" / "s22"
+            stage_dir.mkdir(parents=True)
+            (state / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 22',
+                        'stages:',
+                        '  - id: "s20"',
+                        '    title: "Done prerequisite"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '    path: "stages/s20"',
+                        '  - id: "s22"',
+                        '    title: "Realtime activity heartbeat"',
+                        '    status: "in_progress"',
+                        '    depends_on: ["s20"]',
+                        '    path: "stages/s22"',
+                        '    execution_mode: "decomposed"',
+                        '    decomposition_status: "applied"',
+                        '    current_session: "sessions/old-phase"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (stage_dir / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s22"',
+                        'execution_mode: "decomposed"',
+                        'decomposition_status: "applied"',
+                        'phases:',
+                        '  - id: "22-1"',
+                        '    title: "Done guardrail"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '  - id: "22-2"',
+                        '    title: "Surface verification"',
+                        '    status: "pending"',
+                        '    depends_on: ["22-1"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily(project, "next")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Active stage: s22 - Realtime activity heartbeat", result.stdout)
+            self.assertIn("Next phase: 22-2 - Surface verification", result.stdout)
+
     def test_start_stage_creates_stage_session_without_child_phases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -745,6 +802,408 @@ class WilyCliTest(unittest.TestCase):
             out = strip_ansi(result.stdout)
             self.assertIn("MVP 0 loop", out)
             self.assertIn("2 phases", out)
+
+    def test_watch_stage_mode_renders_stage_header_from_stage_id_not_dependency_depth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            stage_dir = state / "stages" / "s22"
+            stage_dir.mkdir(parents=True)
+            (stage_dir / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s22"',
+                        'execution_mode: "decomposed"',
+                        'decomposition_status: "applied"',
+                        'phases:',
+                        '  - id: "22-1"',
+                        '    title: "Watch contract"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (state / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 22',
+                        'stages:',
+                        '  - id: "s16"',
+                        '    title: "Live overlay"',
+                        '    path: "stages/s16"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '  - id: "s17"',
+                        '    title: "Heartbeat freshness"',
+                        '    path: "stages/s17"',
+                        '    status: "done"',
+                        '    depends_on: ["s16"]',
+                        '  - id: "s18"',
+                        '    title: "Collaboration ops"',
+                        '    path: "stages/s18"',
+                        '    status: "done"',
+                        '    depends_on: ["s17"]',
+                        '  - id: "s19"',
+                        '    title: "Risk view"',
+                        '    path: "stages/s19"',
+                        '    status: "done"',
+                        '    depends_on: ["s18"]',
+                        '  - id: "s20"',
+                        '    title: "Personal visibility"',
+                        '    path: "stages/s20"',
+                        '    status: "done"',
+                        '    depends_on: ["s16"]',
+                        '  - id: "s21"',
+                        '    title: "UI redesign"',
+                        '    path: "stages/s21"',
+                        '    status: "pending"',
+                        '    depends_on: ["s22"]',
+                        '  - id: "s22"',
+                        '    title: "Realtime activity heartbeat"',
+                        '    path: "stages/s22"',
+                        '    status: "ready"',
+                        '    depends_on: ["s20"]',
+                        '    execution_mode: "decomposed"',
+                        '    decomposition_status: "applied"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily_with_env(
+                project,
+                "watch",
+                "--once",
+                "--ui",
+                "ascii",
+                "--show-done",
+                env={"COLUMNS": "110", "LINES": "80"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = strip_ansi(result.stdout)
+            self.assertIn("Stage 22", out)
+            self.assertIn("> s22  Realtime activity heartbeat", out)
+            self.assertIn("22-1  Watch contract", out)
+            stage_18_index = out.index("Stage 18")
+            stage_22_index = out.index("Stage 22")
+            self.assertGreater(stage_22_index, stage_18_index)
+
+    def test_next_reports_first_child_phase_for_ready_decomposed_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            stage_dir = state / "stages" / "s22"
+            stage_dir.mkdir(parents=True)
+            (stage_dir / "stage.md").write_text("# Stage\n\nRealtime work\n", encoding="utf-8")
+            (stage_dir / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s22"',
+                        'execution_mode: "decomposed"',
+                        'decomposition_status: "applied"',
+                        'phases:',
+                        '  - id: "22-1"',
+                        '    title: "Watch contract"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (state / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 22',
+                        'stages:',
+                        '  - id: "s20"',
+                        '    title: "Done prerequisite"',
+                        '    path: "stages/s20"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '  - id: "s22"',
+                        '    title: "Realtime activity heartbeat"',
+                        '    path: "stages/s22"',
+                        '    status: "ready"',
+                        '    depends_on: ["s20"]',
+                        '    execution_mode: "decomposed"',
+                        '    decomposition_status: "applied"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily(project, "next")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Next stage: s22 - Realtime activity heartbeat", result.stdout)
+            self.assertIn("Next phase: 22-1 - Watch contract", result.stdout)
+
+    def test_compact_status_keeps_frontier_stage_header_in_stage_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            for index in range(1, 22):
+                stage_id = f"s{index:02d}"
+                stage_dir = state / "stages" / stage_id
+                stage_dir.mkdir(parents=True)
+                (stage_dir / "stage.yaml").write_text(
+                    "\n".join(
+                        [
+                            f'stage_id: "{stage_id}"',
+                            'execution_mode: "decomposed"',
+                            'decomposition_status: "applied"',
+                            'phases:',
+                            f'  - id: "{index:02d}-1"',
+                            f'    title: "Done phase {index}"',
+                            '    status: "done"',
+                            '    depends_on: []',
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+            (state / "stages" / "s14" / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s14"',
+                        'execution_mode: "decomposed"',
+                        'decomposition_status: "applied"',
+                        'phases:',
+                        '  - id: "14-1"',
+                        '    title: "Done child"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '  - id: "14-2"',
+                        '    title: "Superseded child"',
+                        '    status: "superseded"',
+                        '    depends_on: ["14-1"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            stage_dir = state / "stages" / "s22"
+            stage_dir.mkdir(parents=True)
+            (stage_dir / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s22"',
+                        'execution_mode: "decomposed"',
+                        'decomposition_status: "applied"',
+                        'phases:',
+                        '  - id: "22-1"',
+                        '    title: "Watch contract"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                        '  - id: "22-2"',
+                        '    title: "Next work"',
+                        '    status: "pending"',
+                        '    depends_on: ["22-1"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            roadmap_lines = ['roadmap_version: 22', 'stages:']
+            for index in range(1, 22):
+                stage_id = f"s{index:02d}"
+                roadmap_lines.extend(
+                    [
+                        f'  - id: "{stage_id}"',
+                        f'    title: "Done stage {index}"',
+                        f'    path: "stages/{stage_id}"',
+                        '    status: "done"',
+                        f'    depends_on: {f"[\\\"s{index - 1:02d}\\\"]" if index > 1 else "[]"}',
+                        '    execution_mode: "decomposed"',
+                        '    decomposition_status: "applied"',
+                    ]
+                )
+            roadmap_lines.extend(
+                [
+                    '  - id: "s22"',
+                    '    title: "Realtime activity heartbeat"',
+                    '    path: "stages/s22"',
+                    '    status: "ready"',
+                    '    depends_on: ["s21"]',
+                    '    execution_mode: "decomposed"',
+                    '    decomposition_status: "applied"',
+                ]
+            )
+            (state / "roadmap.yaml").write_text("\n".join(roadmap_lines), encoding="utf-8")
+
+            result = self.run_wily_with_env(
+                project,
+                "status",
+                env={"COLUMNS": "80", "LINES": "24"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = strip_ansi(result.stdout)
+            self.assertIn("Stage 22", out)
+            self.assertIn("22-1  Watch contract", out)
+
+    def test_watch_flags_ready_decomposed_stage_with_missing_child_phases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            (state / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 22',
+                        'stages:',
+                        '  - id: "s20"',
+                        '    title: "Done prerequisite"',
+                        '    path: "stages/s20"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '  - id: "s22"',
+                        '    title: "Realtime activity heartbeat"',
+                        '    path: "stages/s22"',
+                        '    status: "ready"',
+                        '    depends_on: ["s20"]',
+                        '    execution_mode: "decomposed"',
+                        '    decomposition_status: "applied"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily_with_env(
+                project,
+                "watch",
+                "--once",
+                "--ui",
+                "ascii",
+                env={"COLUMNS": "100", "LINES": "30"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = strip_ansi(result.stdout)
+            self.assertIn("missing child phases", out)
+
+    def test_watch_renders_local_live_registry_chip_without_changing_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            stage_dir = state / "stages" / "s22"
+            stage_dir.mkdir(parents=True)
+            (stage_dir / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s22"',
+                        'execution_mode: "decomposed"',
+                        'decomposition_status: "applied"',
+                        'phases:',
+                        '  - id: "22-4"',
+                        '    title: "Board and Watch live rendering"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (state / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 22',
+                        'stages:',
+                        '  - id: "s22"',
+                        '    title: "Realtime activity heartbeat"',
+                        '    path: "stages/s22"',
+                        '    status: "ready"',
+                        '    depends_on: []',
+                        '    execution_mode: "decomposed"',
+                        '    decomposition_status: "applied"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            active_dir = state / "local" / "live" / "active"
+            active_dir.mkdir(parents=True)
+            now = datetime.now(timezone.utc).isoformat()
+            (active_dir / "session-1.json").write_text(
+                json.dumps(
+                    {
+                        "item_type": "phase",
+                        "item_id": "22-4",
+                        "phase_id": "22-4",
+                        "stage_id": "s22",
+                        "actor": "airmang",
+                        "agent": "codex",
+                        "live_status": "active",
+                        "last_seen_at": now,
+                        "last_worked_at": now,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily_with_env(
+                project,
+                "watch",
+                "--once",
+                "--ui",
+                "ascii",
+                env={"COLUMNS": "120", "LINES": "40"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = strip_ansi(result.stdout)
+            self.assertIn("0/1 - 0%", out)
+            self.assertIn("22-4  Board and Watch live rendering", out)
+            self.assertIn("codex working", out)
+
+    def test_watch_renders_local_only_live_item_from_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = self.create_state(project)
+            (state / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 22',
+                        'stages:',
+                        '  - id: "s22"',
+                        '    title: "Realtime activity heartbeat"',
+                        '    path: "stages/s22"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            active_dir = state / "local" / "live" / "active"
+            active_dir.mkdir(parents=True)
+            now = datetime.now(timezone.utc)
+            (active_dir / "session-2.json").write_text(
+                json.dumps(
+                    {
+                        "item_type": "phase",
+                        "item_id": "22-local",
+                        "phase_id": "22-local",
+                        "stage_id": "s22",
+                        "actor": "airmang",
+                        "agent": "claude",
+                        "live_status": "active",
+                        "last_seen_at": now.isoformat(),
+                        "last_worked_at": (now - timedelta(minutes=5)).isoformat(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_wily_with_env(
+                project,
+                "watch",
+                "--once",
+                "--ui",
+                "ascii",
+                env={"COLUMNS": "120", "LINES": "40"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = strip_ansi(result.stdout)
+            self.assertIn("Local activity", out)
+            self.assertIn("22-local", out)
+            self.assertIn("claude active", out)
 
     def test_complete_stage_local_child_phase_updates_stage_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1443,6 +1902,354 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn('status: "in_progress"', roadmap)
             self.assertIn('current_session: "sessions/', roadmap)
 
+    def test_start_does_not_emit_board_live_event_without_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(wily, "emit_board_live_event") as emit:
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            emit.assert_not_called()
+
+    def test_start_emits_board_live_event_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            emitted: list[tuple[str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status))
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("01", "start", "claimed")])
+
+    def test_start_warns_when_board_reports_other_fresh_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            warning = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(
+                wily,
+                "fetch_board_live_claims",
+                return_value=[{"actor": "Julirsia", "last_seen_label": "20s ago"}],
+            ), patch.object(
+                wily, "emit_board_live_event"
+            ), patch(
+                "sys.stderr", warning
+            ):
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board claim warning", warning.getvalue())
+            self.assertIn("Julirsia", warning.getvalue())
+
+    def test_board_live_config_loads_repo_local_untracked_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            local = project / ".wily" / "local"
+            local.mkdir(parents=True)
+            (local / "board.json").write_text(
+                json.dumps(
+                    {
+                        "url": "https://board.local",
+                        "secret": "secret",
+                        "repo": "R-W-LAB/wily-roadmap",
+                        "actor": "airmang",
+                        "agent": "codex",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                config = wily.board_live_config(project)
+
+            self.assertEqual(config["WILY_BOARD_URL"], "https://board.local")
+            self.assertEqual(config["WILY_BOARD_SECRET"], "secret")
+            self.assertEqual(config["WILY_BOARD_REPO"], "R-W-LAB/wily-roadmap")
+            self.assertEqual(config["WILY_BOARD_ACTOR"], "airmang")
+            self.assertEqual(config["WILY_BOARD_AGENT"], "codex")
+
+    def test_start_writes_live_active_registry_without_board_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+
+            with patch.dict(os.environ, {}, clear=True):
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            active_files = sorted((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            self.assertEqual(len(active_files), 1)
+            payload = json.loads(active_files[0].read_text(encoding="utf-8"))
+            self.assertEqual(payload["item_type"], "phase")
+            self.assertEqual(payload["item_id"], "01")
+            self.assertEqual(payload["phase_id"], "01")
+            self.assertEqual(payload["agent"], "codex")
+            self.assertTrue((project / ".wily" / "local" / "live" / f"{payload['session_id']}.alive").exists())
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertNotIn("session_id:", roadmap)
+
+    def test_start_spawns_detached_heartbeat_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                    "WILY_BOARD_HEARTBEAT": "1",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event"), patch.object(wily.subprocess, "Popen") as popen:
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            popen.assert_called_once()
+            command = popen.call_args.args[0]
+            self.assertIn("live-heartbeat", command)
+            self.assertIn("01", command)
+            self.assertIn("--session", command)
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
+    def test_complete_cleans_live_registry_and_alive_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+
+            with patch.dict(os.environ, {}, clear=True):
+                result = wily.command_complete(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(list((project / ".wily" / "local" / "live" / "active").glob("*.json")), [])
+            self.assertFalse((project / ".wily" / "local" / "live" / f"{session_id}.alive").exists())
+
+    def test_live_heartbeat_writes_pid_file_and_updates_registry_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            emitted: list[tuple[str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status))
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_live_heartbeat(project, ["01", "--session", session_id, "--count", "1"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("01", "heartbeat", "active")])
+            self.assertTrue((project / ".wily" / "local" / "live" / f"{session_id}.pid").exists())
+            payload = json.loads(active_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["session_id"], session_id)
+            self.assertEqual(payload["live_status"], "active")
+
+    def test_live_heartbeat_releases_when_parent_shell_is_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            emitted: list[tuple[str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status))
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_live_heartbeat(
+                    project,
+                    ["01", "--session", session_id, "--parent-shell-pid", "999999999", "--count", "1"],
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("01", "release", "released")])
+            self.assertFalse(active_file.exists())
+
+    def test_release_cleans_live_registry_without_changing_phase_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+
+            result = wily.command_release(project, ["01"])
+
+            self.assertEqual(result, 0)
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('status: "in_progress"', roadmap)
+            self.assertEqual(list((project / ".wily" / "local" / "live" / "active").glob("*.json")), [])
+
+    def test_start_recovers_orphan_live_registry_without_alive_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            active = project / ".wily" / "local" / "live" / "active"
+            active.mkdir(parents=True)
+            (active / "orphan.json").write_text(
+                json.dumps({"session_id": "orphan", "item_id": "old", "item_type": "phase"}),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            active_files = sorted(active.glob("*.json"))
+            self.assertEqual(len(active_files), 1)
+            self.assertNotEqual(active_files[0].name, "orphan.json")
+
+    def test_live_worked_resolves_active_session_and_updates_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+
+            result = wily.command_live_worked(project, ["01", "--agent", "codex", "--tool", "Edit"])
+
+            self.assertEqual(result, 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            payload = json.loads(active_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["event"], "worked")
+            self.assertEqual(payload["tool"], "Edit")
+            self.assertEqual(payload["live_status"], "active")
+            self.assertIn("last_worked_at", payload)
+
+    def test_live_worked_from_hook_without_active_session_is_non_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+
+            result = wily.command_live_worked(project, ["--from-hook", "--agent", "codex"])
+
+            self.assertEqual(result, 0)
+
+    def test_hooks_install_codex_writes_post_tool_use_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            hook_path = project / "hooks.json"
+
+            result = wily.command_hooks(project, ["install", "--target", "codex", "--path", str(hook_path)])
+
+            self.assertEqual(result, 0)
+            payload = json.loads(hook_path.read_text(encoding="utf-8"))
+            text = json.dumps(payload)
+            self.assertIn("PostToolUse", text)
+            self.assertIn("live-worked", text)
+            self.assertIn("--from-hook", text)
+
+    def test_hooks_install_claude_writes_post_tool_use_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            settings_path = project / "settings.json"
+
+            result = wily.command_hooks(project, ["install", "--target", "claude", "--path", str(settings_path)])
+
+            self.assertEqual(result, 0)
+            payload = json.loads(settings_path.read_text(encoding="utf-8"))
+            text = json.dumps(payload)
+            self.assertIn("PostToolUse", text)
+            self.assertIn("live-worked", text)
+            self.assertIn("--from-hook", text)
+
+    def test_codex_bridge_fixture_converts_item_completed_to_worked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            fixture = project / "notifications.jsonl"
+            fixture.write_text(
+                json.dumps({"method": "turn/started", "params": {}})
+                + "\n"
+                + json.dumps({"method": "item/completed", "params": {"item": {"type": "tool", "name": "Edit"}}})
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = wily.command_codex_bridge(project, ["--session", session_id, "--fixture", str(fixture), "--once"])
+
+            self.assertEqual(result, 0)
+            payload = json.loads(active_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["event"], "worked")
+            self.assertEqual(payload["agent"], "codex-desktop")
+            self.assertIn("last_worked_at", payload)
+
+    def test_codex_bridge_missing_fixture_degrades_to_heartbeat_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+
+            result = wily.command_codex_bridge(
+                project,
+                ["--session", session_id, "--fixture", str(project / "missing.jsonl"), "--once"],
+            )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(active_file.read_text(encoding="utf-8"))
+            self.assertNotIn("last_worked_at", payload)
+
     def test_start_preserves_block_yaml_roadmap_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -1563,6 +2370,31 @@ class WilyCliTest(unittest.TestCase):
             self.assertEqual(len(status_files), 1)
             self.assertIn('status: "verified"', status_files[0].read_text(encoding="utf-8"))
 
+    def test_complete_emits_board_live_event_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            self.run_wily(project, "start", "01")
+            emitted: list[tuple[str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status))
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_complete(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("01", "complete", "completed_local")])
+
     def test_complete_without_current_session_clears_stale_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -1607,6 +2439,87 @@ class WilyCliTest(unittest.TestCase):
             self.assertEqual(len(status_files), 1)
             self.assertIn('status: "blocked"', status_files[0].read_text(encoding="utf-8"))
             self.assertIn('blocker: "Permission missing"', status_files[0].read_text(encoding="utf-8"))
+
+    def test_block_emits_board_live_event_with_reason_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            self.run_wily(project, "start", "01")
+            emitted: list[tuple[str, str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status, note))
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_block(project, ["01", "Permission missing"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("01", "block", "blocked_local", "Permission missing")])
+
+    def test_live_heartbeat_requires_phase_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+
+            result = wily.command_live_heartbeat(project, [])
+
+            self.assertEqual(result, 2)
+
+    def test_live_heartbeat_requires_board_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+
+            with patch.dict(os.environ, {}, clear=True):
+                result = wily.command_live_heartbeat(project, ["01", "--count", "1"])
+
+            self.assertEqual(result, 1)
+
+    def test_live_heartbeat_emits_active_event_with_count_and_note(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            self.run_wily(project, "start", "01")
+            emitted: list[tuple[str, str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status, note))
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event), patch.object(
+                wily.time, "sleep"
+            ) as sleep:
+                result = wily.command_live_heartbeat(
+                    project,
+                    ["01", "--count", "2", "--interval", "0.01", "--note", "running tests"],
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                emitted,
+                [
+                    ("01", "heartbeat", "active", "running tests"),
+                    ("01", "heartbeat", "active", "running tests"),
+                ],
+            )
+            sleep.assert_called_once_with(0.01)
 
     def test_block_without_current_session_updates_roadmap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
