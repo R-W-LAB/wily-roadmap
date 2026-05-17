@@ -1,4 +1,4 @@
-roadmap_version: 24
+roadmap_version: 26
 roadmap_schema: "stage-v1"
 goal: "wily roadmap 플러그인을 다듬는 중이야."
 stages:
@@ -187,12 +187,13 @@ stages:
   - id: "s21"
     title: "Wily Board UI redesign"
     path: "stages/s21-wily-board-ui-redesign"
-    status: "pending"
+    status: "done"
     depends_on: ["s23"]
     execution_mode: "decomposed"
     decomposition_status: "applied"
     owner: "codex"
-    task: "redesign Wily Board into a read-only multi-repo personal work dashboard using the Stage s22 live activity model, with FastAPI JSON/SSE backend support and a Next.js frontend cutover plan"
+    task: "redesign Wily Board into a read-only multi-repo personal work dashboard, first linking CustomWorkflow checkpoint status boards to Wily Phase progress so Roadmap, Watch, and Board can show checkpoint activity as live runner overlay"
+    current_session: "sessions/2026-05-17-014921-phase-21-1-attempt-1"
 
   - id: "s22"
     title: "Wily Roadmap realtime activity heartbeat"
@@ -214,3 +215,14 @@ stages:
     decomposition_status: "applied"
     owner: "codex"
     task: "show local Stage decomposition topology on Wily Board before commit and push by emitting signed draft events, rendering provisional child phases, and clearing drafts after durable GitHub sync"
+
+  - id: "s24"
+    title: "S21 realtime Board bridge end-to-end hardening"
+    path: "stages/s24-s21-realtime-board-bridge-e2e"
+    status: "done"
+    depends_on: ["s21"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "turn the S21 checkpoint/live bridge requirements into a verified end-to-end path from Wily live session, CustomWorkflow status board, and Codex hook activity through Board API/SSE/UI, with local E2E proof before approval-gated production smoke"
+    current_session: "sessions/2026-05-17-105613-phase-24-3-attempt-1"

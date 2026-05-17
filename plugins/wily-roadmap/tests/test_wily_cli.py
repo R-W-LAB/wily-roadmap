@@ -2135,6 +2135,82 @@ class WilyCliTest(unittest.TestCase):
             self.assertEqual(config["WILY_BOARD_ACTOR"], "airmang")
             self.assertEqual(config["WILY_BOARD_AGENT"], "codex")
 
+    def test_board_live_config_loads_repo_root_untracked_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = project / ".wily"
+            state.mkdir()
+            (state / "board.json").write_text(
+                json.dumps(
+                    {
+                        "url": "https://board.local",
+                        "secret": "root-secret",
+                        "repo": "R-W-LAB/wily-roadmap",
+                        "actor": "airmang",
+                        "agent": "codex",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                config = wily.board_live_config(project)
+
+            self.assertEqual(config["WILY_BOARD_URL"], "https://board.local")
+            self.assertEqual(config["WILY_BOARD_SECRET"], "root-secret")
+            self.assertEqual(config["WILY_BOARD_REPO"], "R-W-LAB/wily-roadmap")
+            self.assertEqual(config["WILY_BOARD_ACTOR"], "airmang")
+            self.assertEqual(config["WILY_BOARD_AGENT"], "codex")
+
+    def test_board_check_reports_missing_config_and_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            hooks_path = project / "hooks.json"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+                result = wily.command_board(project, ["check", "--hooks-path", str(hooks_path)])
+
+            self.assertEqual(result, 1)
+            combined = stdout.getvalue() + stderr.getvalue()
+            self.assertIn("Board live config: missing", combined)
+            self.assertIn("WILY_BOARD_URL", combined)
+            self.assertIn("Codex hook: missing", combined)
+
+    def test_board_check_redacts_secret_and_detects_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = project / ".wily"
+            state.mkdir()
+            (state / "board.json").write_text(
+                json.dumps(
+                    {
+                        "url": "https://board.local",
+                        "secret": "do-not-print",
+                        "repo": "R-W-LAB/wily-roadmap",
+                        "actor": "airmang",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            hooks_path = project / "hooks.json"
+            self.assertEqual(wily.command_hooks(project, ["install", "--target", "codex", "--path", str(hooks_path)]), 0)
+            stdout = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout):
+                result = wily.command_board(project, ["check", "--hooks-path", str(hooks_path)])
+
+            output = stdout.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("Board live config: ok", output)
+            self.assertIn("https://board.local", output)
+            self.assertIn("R-W-LAB/wily-roadmap", output)
+            self.assertIn("airmang", output)
+            self.assertIn("secret: <redacted>", output)
+            self.assertIn("Codex hook: ok", output)
+            self.assertNotIn("do-not-print", output)
+
     def test_start_writes_live_active_registry_without_board_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -2347,6 +2423,241 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn("PostToolUse", text)
             self.assertIn("live-worked", text)
             self.assertIn("--from-hook", text)
+
+    def test_checkpoint_sync_reads_custom_workflow_status_board_without_completing_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            handoffs = project / "agent-handoffs"
+            handoffs.mkdir()
+            status_board = handoffs / "demo-status.md"
+            status_board.write_text(
+                "\n".join(
+                    [
+                        "# Goal Status: Demo",
+                        "",
+                        "State: RUNNING",
+                        "Progress: 1 / 3 (33%)",
+                        "",
+                        "## Now",
+                        "",
+                        "Current checkpoint: CP02 - Build adapter",
+                        "Current action: parsing status board",
+                        "Next checkpoint: CP03 - Verify board payload",
+                        "Current blocker: none",
+                        "",
+                        "## Checkpoints",
+                        "",
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP01 | DONE | Contract | root | baseline passed |",
+                        "| CP02 | RUNNING | Build adapter | root |  |",
+                        "| CP03 | TODO | Verify board payload | root |  |",
+                        "",
+                        "## Verification",
+                        "",
+                        "| Command / Check | Last run | Exit | Status | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| `python -m unittest` | 2026-05-17T00:00:00Z | 0 | PASS | adapter tests |",
+                        "",
+                        "## Recent Events",
+                        "",
+                        "- 2026-05-17T00:00:00Z - Started CP02.",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            emitted: list[tuple[dict, str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> tuple[bool, str]:
+                emitted.append((phase, event, live_status, note))
+                return True, ""
+
+            env = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/demo",
+                "WILY_BOARD_ACTOR": "airmang",
+                "WILY_BOARD_AGENT": "codex",
+            }
+            with patch.dict(os.environ, env, clear=True), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_checkpoint_sync(project, ["01", "--status-board", str(status_board)])
+
+            self.assertEqual(result, 0)
+            payload_path = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            payload = json.loads(payload_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["event"], "checkpoint_updated")
+            self.assertEqual(payload["live_status"], "active")
+            self.assertEqual(payload["checkpoint"]["current"]["id"], "CP02")
+            self.assertEqual(payload["checkpoint"]["next"]["id"], "CP03")
+            self.assertEqual(payload["checkpoint"]["progress"]["done"], 1)
+            self.assertEqual(payload["checkpoint"]["current_action"], "parsing status board")
+            self.assertEqual(payload["checkpoint"]["recent_events"], ["2026-05-17T00:00:00Z - Started CP02."])
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('status: "ready"', roadmap)
+            self.assertEqual(emitted[0][1:], ("checkpoint_updated", "active", "parsing status board"))
+
+    def test_live_worked_preserves_checkpoint_context_on_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            status_board = project / "status.md"
+            status_board.write_text(
+                "\n".join(
+                    [
+                        "# Goal Status: Demo",
+                        "",
+                        "State: RUNNING",
+                        "Progress: 1 / 2 (50%)",
+                        "Current checkpoint: CP02 - Build adapter",
+                        "Current action: editing bridge",
+                        "Next checkpoint: CP03 - Verify",
+                        "Current blocker: none",
+                        "",
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP02 | RUNNING | Build adapter | root |  |",
+                        "| CP03 | TODO | Verify | root |  |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/demo",
+                "WILY_BOARD_ACTOR": "airmang",
+                "WILY_BOARD_AGENT": "codex",
+            }
+
+            with patch.dict(os.environ, env, clear=True), patch.object(wily, "fetch_board_live_claims", return_value=[]), patch.object(
+                wily, "emit_board_live_event", return_value=(True, "")
+            ):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+                self.assertEqual(wily.command_checkpoint_sync(project, ["01", "--status-board", str(status_board)]), 0)
+                checkpoint_payload = json.loads(
+                    next((project / ".wily" / "local" / "live" / "active").glob("*.json")).read_text(encoding="utf-8")
+                )
+                session_id = checkpoint_payload["session_id"]
+                self.assertEqual(wily.command_live_worked(project, ["01", "--summary", "edited bridge"]), 0)
+
+            worked_payload = json.loads(
+                (project / ".wily" / "local" / "live" / "active" / f"{session_id}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(worked_payload["event"], "worked")
+            self.assertEqual(worked_payload["session_id"], session_id)
+            self.assertEqual(worked_payload["checkpoint"]["current"]["id"], "CP02")
+            self.assertEqual(worked_payload["summary"], "edited bridge")
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('status: "in_progress"', roadmap)
+
+    def test_live_heartbeat_preserves_checkpoint_context_on_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            status_board = project / "status.md"
+            status_board.write_text(
+                "\n".join(
+                    [
+                        "# Goal Status: Demo",
+                        "",
+                        "State: RUNNING",
+                        "Progress: 1 / 2 (50%)",
+                        "Current checkpoint: CP02 - Build adapter",
+                        "Current action: editing bridge",
+                        "Next checkpoint: CP03 - Verify",
+                        "Current blocker: none",
+                        "",
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP02 | RUNNING | Build adapter | root |  |",
+                        "| CP03 | TODO | Verify | root |  |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/demo",
+                "WILY_BOARD_ACTOR": "airmang",
+                "WILY_BOARD_AGENT": "codex",
+            }
+            emitted: list[dict[str, object]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> tuple[bool, str]:
+                emitted.append(dict(phase))
+                return True, ""
+
+            with patch.dict(os.environ, env, clear=True), patch.object(wily, "fetch_board_live_claims", return_value=[]), patch.object(
+                wily, "emit_board_live_event", side_effect=record_event
+            ):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+                self.assertEqual(wily.command_checkpoint_sync(project, ["01", "--status-board", str(status_board)]), 0)
+                checkpoint_payload = json.loads(
+                    next((project / ".wily" / "local" / "live" / "active").glob("*.json")).read_text(encoding="utf-8")
+                )
+                session_id = checkpoint_payload["session_id"]
+                self.assertEqual(wily.command_live_heartbeat(project, ["01", "--session", session_id, "--count", "1"]), 0)
+
+            heartbeat_payload = json.loads(
+                (project / ".wily" / "local" / "live" / "active" / f"{session_id}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(heartbeat_payload["event"], "heartbeat")
+            self.assertEqual(heartbeat_payload["session_id"], session_id)
+            self.assertEqual(heartbeat_payload["checkpoint"]["current"]["id"], "CP02")
+            self.assertEqual(emitted[-1]["checkpoint"]["current"]["id"], "CP02")
+
+    def test_live_heartbeat_reuses_active_checkpoint_session_without_session_arg(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            status_board = project / "status.md"
+            status_board.write_text(
+                "\n".join(
+                    [
+                        "# Goal Status: Demo",
+                        "",
+                        "State: RUNNING",
+                        "Progress: 1 / 2 (50%)",
+                        "Current checkpoint: CP02 - Build adapter",
+                        "Current action: editing bridge",
+                        "Next checkpoint: CP03 - Verify",
+                        "Current blocker: none",
+                        "",
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP02 | RUNNING | Build adapter | root |  |",
+                        "| CP03 | TODO | Verify | root |  |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/demo",
+                "WILY_BOARD_ACTOR": "airmang",
+                "WILY_BOARD_AGENT": "codex",
+            }
+
+            with patch.dict(os.environ, env, clear=True), patch.object(wily, "fetch_board_live_claims", return_value=[]), patch.object(
+                wily, "emit_board_live_event", return_value=(True, "")
+            ):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+                self.assertEqual(wily.command_checkpoint_sync(project, ["01", "--status-board", str(status_board)]), 0)
+                checkpoint_payload = json.loads(
+                    next((project / ".wily" / "local" / "live" / "active").glob("*.json")).read_text(encoding="utf-8")
+                )
+                session_id = checkpoint_payload["session_id"]
+                self.assertEqual(wily.command_live_heartbeat(project, ["01", "--count", "1"]), 0)
+
+            heartbeat_payload = json.loads(
+                (project / ".wily" / "local" / "live" / "active" / f"{session_id}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(heartbeat_payload["event"], "heartbeat")
+            self.assertEqual(heartbeat_payload["session_id"], session_id)
+            self.assertEqual(heartbeat_payload["checkpoint"]["current"]["id"], "CP02")
 
     def test_codex_bridge_fixture_converts_item_completed_to_worked(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2624,6 +2935,36 @@ class WilyCliTest(unittest.TestCase):
                 result = wily.command_live_heartbeat(project, ["01", "--count", "1"])
 
             self.assertEqual(result, 1)
+
+    def test_live_heartbeat_uses_repo_root_board_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            state = project / ".wily"
+            state.mkdir(exist_ok=True)
+            (state / "board.json").write_text(
+                json.dumps(
+                    {
+                        "url": "https://board.local",
+                        "secret": "root-secret",
+                        "repo": "R-W-LAB/wily-roadmap",
+                        "actor": "airmang",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            emitted: list[tuple[str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
+                emitted.append((str(phase["id"]), event, live_status))
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                wily, "emit_board_live_event", side_effect=record_event
+            ):
+                result = wily.command_live_heartbeat(project, ["01", "--count", "1"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("01", "heartbeat", "active")])
 
     def test_live_heartbeat_emits_active_event_with_count_and_note(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

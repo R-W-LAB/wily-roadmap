@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import unicodedata
@@ -81,6 +82,7 @@ MIN_WIDTH_RAIL = 28
 LOCAL_LIVE_FRESH_SECONDS = 120
 LOCAL_LIVE_STALE_SECONDS = 300
 LOCAL_LIVE_WORK_SECONDS = 90
+BOARD_LIVE_ENV = ("WILY_BOARD_URL", "WILY_BOARD_SECRET", "WILY_BOARD_REPO", "WILY_BOARD_ACTOR")
 
 
 @dataclass
@@ -135,6 +137,50 @@ def _load(root: Path) -> _RoadmapView:
         is_stage_mode=is_stage_mode,
         live_items=live_items,
     )
+
+
+def _board_config_file_values(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    aliases = {
+        "url": "WILY_BOARD_URL",
+        "secret": "WILY_BOARD_SECRET",
+        "repo": "WILY_BOARD_REPO",
+        "actor": "WILY_BOARD_ACTOR",
+    }
+    values: dict[str, str] = {}
+    for key, value in payload.items():
+        env_key = key if str(key).startswith("WILY_BOARD_") else aliases.get(str(key))
+        if env_key:
+            values[env_key] = str(value).strip()
+    return values
+
+
+def _board_live_missing_keys(root: Path) -> list[str]:
+    values: dict[str, str] = {}
+    values.update(_board_config_file_values(Path(os.environ.get("WILY_BOARD_USER_CONFIG", str(Path.home() / ".wily" / "board.json")))))
+    values.update(_board_config_file_values(root / ".wily" / "board.json"))
+    values.update(_board_config_file_values(root / ".wily" / "local" / "board.json"))
+    for name in BOARD_LIVE_ENV:
+        env_value = os.environ.get(name, "").strip()
+        if env_value:
+            values[name] = env_value
+    return [name for name in BOARD_LIVE_ENV if not values.get(name)]
+
+
+def _active_live_bridge_warning(view: _RoadmapView) -> Line | None:
+    has_active = any(str(phase.get("status") or "") == "in_progress" for phase in view.phases)
+    if not has_active:
+        return None
+    if not _board_live_missing_keys(view.root):
+        return None
+    return [(" ! Board live not connected - run wily board check", "yellow")]
 
 
 def _parse_live_time(value: Any) -> datetime | None:
@@ -373,7 +419,7 @@ def _stage_header(num: int, count: int, width: int, ascii_: bool) -> Line:
 def _stage_unit_header(stage: Phase, width: int, ascii_: bool) -> Line:
     stage_id = str(stage.get("id", "?"))
     match = re.match(r"s0*(\d+)", stage_id)
-    label = f" Stage {int(match.group(1))}" if match else f" Stage {stage_id}"
+    label = f" Stage {int(match.group(1))} ({stage_id})" if match else f" Stage {stage_id}"
     fill = "-" if ascii_ else "─"
     text = f"{label} "
     if len(text) < width:
@@ -476,16 +522,44 @@ def _live_detail_for_phase(live_items: list[dict[str, Any]], phase: Phase) -> st
     if not live_items:
         return ""
     ids = _phase_item_ids(phase)
-    labels = [
-        str(item.get("label"))
-        for item in live_items
-        if str(item.get("item_id")) in ids
-        or str(item.get("phase_id") or "") in ids
-        or (
-            str(item.get("item_type")) == "stage"
-            and str(item.get("stage_id") or "") in ids
-        )
-    ]
+    labels = []
+    for item in live_items:
+        if not (
+            str(item.get("item_id")) in ids
+            or str(item.get("phase_id") or "") in ids
+            or (
+                str(item.get("item_type")) == "stage"
+                and str(item.get("stage_id") or "") in ids
+            )
+        ):
+            continue
+        checkpoint = item.get("checkpoint")
+        if isinstance(checkpoint, dict):
+            current = checkpoint.get("current") if isinstance(checkpoint.get("current"), dict) else {}
+            progress = checkpoint.get("progress") if isinstance(checkpoint.get("progress"), dict) else {}
+            checkpoint_id = str(current.get("id") or "").strip()
+            if checkpoint_id:
+                total = progress.get("total") or 0
+                done = progress.get("done") or 0
+                progress_text = f" {done}/{total}" if total else ""
+                parts = [f"checkpoint {checkpoint_id}{progress_text}"]
+                action = str(checkpoint.get("current_action") or "").strip()
+                if action:
+                    parts.append(action)
+                blocker = str(checkpoint.get("blocker") or "").strip()
+                if blocker:
+                    parts.append(f"blocker {blocker}")
+                verification = checkpoint.get("verification")
+                if isinstance(verification, dict):
+                    evidence = str(verification.get("evidence") or "").strip()
+                    status = str(verification.get("status") or "").strip()
+                    if evidence:
+                        parts.append(evidence)
+                    elif status:
+                        parts.append(f"verification {status}")
+                labels.append(" · ".join(parts))
+                continue
+        labels.append(str(item.get("label")))
     if not labels:
         return ""
     return "live " + ", ".join(labels)
@@ -1034,18 +1108,21 @@ def _trim_frontier_compact_lines(lines: list[Line], kinds: list[str], max_rows: 
     if max_rows <= 0:
         return []
 
-    frontier_kinds = {"frontier-header", "frontier-node", "frontier-child"}
+    frontier_kinds = {"frontier-header", "frontier-node", "frontier-child", "future-node"}
+    node_kinds = {"frontier-node", "frontier-child", "future-node"}
     frontier_indexes = [index for index, kind in enumerate(kinds) if kind in frontier_kinds]
     if not frontier_indexes:
         return lines[:max_rows]
 
     frontier_lines = [lines[index] for index in frontier_indexes]
     if len(frontier_lines) >= max_rows:
+        node_indexes = [index for index in frontier_indexes if kinds[index] in node_kinds]
+        if kinds and kinds[0] == "done" and node_indexes and len(node_indexes) + 1 <= max_rows:
+            return [lines[0]] + [lines[index] for index in node_indexes[: max_rows - 1]]
         if max_rows == 1:
-            node_indexes = [
-                index for index in frontier_indexes if kinds[index] in {"frontier-node", "frontier-child"}
-            ]
             return [lines[node_indexes[0]]] if node_indexes else [frontier_lines[0]]
+        if node_indexes and len(node_indexes) >= max_rows:
+            return [lines[index] for index in node_indexes[:max_rows]]
         return frontier_lines[:max_rows]
 
     kept: list[Line] = []
@@ -1126,7 +1203,32 @@ def _compact_frontier_lines(
             kinds.extend(child_kinds)
 
     for num, stage in enumerate(stages[frontier_index + 1 :], start=frontier_index + 2):
-        lines.append(_future_stage_summary_line(num, stage, width, ascii_))
+        blocked_nodes = [
+            phase
+            for phase in stage
+            if str(phase.get("status") or "") in {"blocked", "needs_review"}
+        ]
+        if blocked_nodes:
+            for phase in blocked_nodes:
+                lines.append(
+                    _node_line(
+                        phase,
+                        view.ready_ids,
+                        by_id,
+                        prefix=" ",
+                        id_width=id_width,
+                        width=width,
+                        ascii_=ascii_,
+                        runner_detail=_runner_status_detail(view.root, phase),
+                        live_detail=_live_detail_for_phase(view.live_items, phase),
+                    )
+                )
+                kinds.append("future-node")
+            continue
+        if view.is_stage_mode:
+            lines.append(_stage_unit_header(stage[0], width, ascii_))
+        else:
+            lines.append(_future_stage_summary_line(num, stage, width, ascii_))
         kinds.append("future-summary")
 
     return _trim_frontier_compact_lines(lines, kinds, max_rows)
@@ -1317,6 +1419,9 @@ def render_watch(
         expand_done=expand_done,
         scroll_offset=scroll_offset,
     )
+    warning = _active_live_bridge_warning(view)
+    if warning is not None:
+        body = [_crop_line(warning, cols), *body]
     lines = [
         _header_line(version=view.version, interval=interval, width=cols, ascii_=ascii_),
         _progress_line(done=view.done, total=view.total, width=cols, ascii_=ascii_),

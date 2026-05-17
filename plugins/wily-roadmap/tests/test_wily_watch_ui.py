@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import subprocess
 import sys
 import tempfile
 import unicodedata
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -695,6 +697,70 @@ class RenderWatchTest(unittest.TestCase):
 
             self.assertIn("Runner phase", out)
             self.assertIn("runner needs_review", out)
+
+    def test_render_shows_checkpoint_overlay_from_local_live_registry(self) -> None:
+        body = "\n".join([
+            'roadmap_version: 4',
+            'phases:',
+            '  - id: "01"',
+            '    title: "Checkpoint phase"',
+            '    status: "in_progress"',
+            '    depends_on: []',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self._make(project, body)
+            active_dir = project / ".wily" / "local" / "live" / "active"
+            active_dir.mkdir(parents=True)
+            (active_dir / "checkpoint.json").write_text(
+                json.dumps(
+                    {
+                        "session_id": "checkpoint",
+                        "item_type": "phase",
+                        "item_id": "01",
+                        "phase_id": "01",
+                        "actor": "airmang",
+                        "agent": "codex",
+                        "event": "checkpoint_updated",
+                        "live_status": "active",
+                        "last_seen_at": "2099-01-01T00:00:00Z",
+                        "checkpoint": {
+                            "current": {"id": "CP02", "title": "Adapter"},
+                            "progress": {"done": 1, "total": 3, "percent": 33},
+                            "current_action": "editing bridge",
+                            "verification": {"status": "PASS", "evidence": "adapter tests"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            out = wily_watch_ui.render_watch(project, interval=2.0, rich=False, size=(110, 12))
+
+            self.assertIn("Checkpoint phase", out)
+            self.assertIn("checkpoint CP02", out)
+            self.assertIn("1/3", out)
+            self.assertIn("editing bridge", out)
+            self.assertIn("adapter tests", out)
+
+    def test_render_warns_when_active_work_has_no_board_live_config(self) -> None:
+        body = "\n".join([
+            'roadmap_version: 4',
+            'phases:',
+            '  - id: "01"',
+            '    title: "Active phase"',
+            '    status: "in_progress"',
+            '    depends_on: []',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self._make(project, body)
+
+            with patch.dict(os.environ, {}, clear=True):
+                out = wily_watch_ui.render_watch(project, interval=2.0, rich=False, size=(110, 12))
+
+            self.assertIn("Board live not connected", out)
+            self.assertIn("wily board check", out)
 
     def test_render_shows_phase_owner_and_task_metadata(self) -> None:
         body = "\n".join([

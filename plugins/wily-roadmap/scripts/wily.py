@@ -82,6 +82,7 @@ def board_live_config_values(root: Path | None = None) -> dict[str, str]:
     user_config = Path(os.environ.get("WILY_BOARD_USER_CONFIG", str(Path.home() / ".wily" / "board.json")))
     values.update(_board_config_file_values(user_config))
     if root is not None:
+        values.update(_board_config_file_values(root / ".wily" / "board.json"))
         values.update(_board_config_file_values(root / ".wily" / "local" / "board.json"))
     for name in (*BOARD_LIVE_ENV, *BOARD_LIVE_OPTIONAL_ENV):
         env_value = os.environ.get(name, "").strip()
@@ -105,6 +106,26 @@ def missing_board_live_config_keys(root: Path | None = None) -> list[str]:
 
 def board_live_enabled(root: Path | None = None) -> bool:
     return board_live_config(root) is not None
+
+
+def redacted_board_live_config(values: dict[str, str]) -> dict[str, str]:
+    redacted: dict[str, str] = {}
+    for key, value in values.items():
+        if key == "WILY_BOARD_SECRET" and value:
+            redacted[key] = "<redacted>"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def codex_hook_installed(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return "live-worked" in json.dumps(payload)
 
 
 def board_live_signature(secret: str, body: bytes) -> str:
@@ -143,7 +164,7 @@ def emit_board_live_event(
         "note": note,
         "client_time": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
-    for key in ("current_item_id", "draft_kind", "phases", "worked"):
+    for key in ("current_item_id", "draft_kind", "phases", "worked", "checkpoint"):
         if key in phase:
             payload[key] = phase[key]
     if not payload["phase_id"]:
@@ -305,6 +326,8 @@ def live_registry_payload(
     }
     if event == "worked":
         payload["last_worked_at"] = now
+    if "checkpoint" in item:
+        payload["checkpoint"] = item["checkpoint"]
     if parent_shell_pid:
         payload["parent_shell_pid"] = parent_shell_pid
     if not phase_id:
@@ -339,6 +362,264 @@ def live_draft_stage_decomposition_payload(root: Path, stage: Stage, phases: lis
         "agent": live_agent(root),
         "phases": normalized_phases,
     }
+
+
+def _clean_markdown_cell(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == "`":
+        value = value[1:-1]
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _parse_status_field(lines: list[str], label: str) -> str:
+    prefix = f"{label}:"
+    for line in lines:
+        if line.strip().lower().startswith(prefix.lower()):
+            return _clean_markdown_cell(line.split(":", 1)[1])
+    return ""
+
+
+def _parse_progress(value: str) -> dict[str, int]:
+    match = re.search(r"(\d+)\s*/\s*(\d+)(?:\s*\((\d+)%\))?", value)
+    if not match:
+        return {"done": 0, "total": 0, "percent": 0}
+    done = int(match.group(1))
+    total = int(match.group(2))
+    percent = int(match.group(3)) if match.group(3) else int((done / total) * 100) if total else 0
+    return {"done": done, "total": total, "percent": percent}
+
+
+def _parse_checkpoint_ref(value: str) -> dict[str, str]:
+    value = _clean_markdown_cell(value)
+    if not value or value.lower() in {"none", "n/a", "-"}:
+        return {}
+    if " - " in value:
+        checkpoint_id, title = value.split(" - ", 1)
+    else:
+        parts = value.split(maxsplit=1)
+        checkpoint_id = parts[0]
+        title = parts[1] if len(parts) > 1 else ""
+    return {"id": checkpoint_id.strip(), "title": title.strip()}
+
+
+def _markdown_table_rows(lines: list[str], required_headers: set[str]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            index += 1
+            continue
+        headers = [_clean_markdown_cell(cell) for cell in line.strip("|").split("|")]
+        normalized = {header.lower() for header in headers}
+        if not required_headers.issubset(normalized):
+            index += 1
+            continue
+        index += 1
+        if index < len(lines) and re.match(r"^\s*\|[\s:\-|]+\|\s*$", lines[index]):
+            index += 1
+        while index < len(lines):
+            row_line = lines[index].strip()
+            if not row_line.startswith("|") or not row_line.endswith("|"):
+                break
+            cells = [_clean_markdown_cell(cell) for cell in row_line.strip("|").split("|")]
+            if len(cells) >= len(headers):
+                rows.append({headers[pos].lower(): cells[pos] for pos in range(len(headers))})
+            index += 1
+        break
+    return rows
+
+
+def _parse_markdown_bullets_under_heading(lines: list[str], heading: str) -> list[str]:
+    bullets: list[str] = []
+    in_section = False
+    target = heading.strip().lower()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if in_section:
+                break
+            in_section = stripped[3:].strip().lower() == target
+            continue
+        if in_section and stripped.startswith("- "):
+            bullets.append(_clean_markdown_cell(stripped[2:]))
+    return bullets
+
+
+def _checkpoint_from_row(row: dict[str, str]) -> dict[str, str]:
+    return {
+        "id": row.get("id", ""),
+        "title": row.get("checkpoint", ""),
+        "status": row.get("status", "").lower(),
+        "owner": row.get("owner", ""),
+        "evidence": row.get("evidence", ""),
+    }
+
+
+def parse_checkpoint_status_board(path: Path, root: Path | None = None) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    checkpoint_rows = [_checkpoint_from_row(row) for row in _markdown_table_rows(lines, {"id", "status", "checkpoint"})]
+    verification_rows = _markdown_table_rows(lines, {"status", "evidence"})
+    current = _parse_checkpoint_ref(_parse_status_field(lines, "Current checkpoint"))
+    next_checkpoint = _parse_checkpoint_ref(_parse_status_field(lines, "Next checkpoint"))
+
+    def row_for(checkpoint: dict[str, str]) -> dict[str, str]:
+        checkpoint_id = checkpoint.get("id")
+        if not checkpoint_id:
+            return {}
+        for row in checkpoint_rows:
+            if row.get("id") == checkpoint_id:
+                return row
+        return {}
+
+    current_row = row_for(current)
+    if current_row:
+        current = {**current, **{key: value for key, value in current_row.items() if value}}
+    if not current:
+        for row in checkpoint_rows:
+            if row.get("status") in {"running", "in_progress", "verifying", "verify", "partial", "blocked"}:
+                current = row
+                break
+    next_row = row_for(next_checkpoint)
+    if next_row:
+        next_checkpoint = {**next_checkpoint, **{key: value for key, value in next_row.items() if value}}
+    if not next_checkpoint:
+        for row in checkpoint_rows:
+            if row.get("status") in {"todo", "pending", "ready"}:
+                next_checkpoint = row
+                break
+
+    blocker = _parse_status_field(lines, "Current blocker")
+    if blocker.lower() in {"none", "n/a", "-"}:
+        blocker = ""
+    source = path
+    if root is not None:
+        try:
+            source = path.relative_to(root)
+        except ValueError:
+            pass
+    verification = verification_rows[-1] if verification_rows else {}
+    return {
+        "source": source.as_posix() if isinstance(source, Path) else str(source),
+        "state": _parse_status_field(lines, "State").lower(),
+        "progress": _parse_progress(_parse_status_field(lines, "Progress")),
+        "current": current,
+        "next": next_checkpoint,
+        "current_action": _parse_status_field(lines, "Current action"),
+        "blocker": blocker,
+        "verification": verification,
+        "recent_events": _parse_markdown_bullets_under_heading(lines, "Recent Events"),
+        "rows": checkpoint_rows,
+    }
+
+
+def _checkpoint_live_status(checkpoint: dict[str, Any]) -> str:
+    current = checkpoint.get("current") if isinstance(checkpoint.get("current"), dict) else {}
+    state = str(checkpoint.get("state") or "").lower()
+    blocker = str(checkpoint.get("blocker") or "")
+    status = str(current.get("status") or "").lower()
+    progress = checkpoint.get("progress") if isinstance(checkpoint.get("progress"), dict) else {}
+    if blocker or status == "blocked" or state == "blocked":
+        return "blocked_local"
+    if state in {"done", "complete", "completed"} or (
+        progress.get("total") and progress.get("done") == progress.get("total")
+    ):
+        return "completed_local"
+    return "active"
+
+
+def _status_board_candidates(root: Path, item: Phase) -> list[Path]:
+    candidates: list[Path] = []
+    current = item.get("current_session")
+    if current:
+        session = root / ".wily" / str(current)
+        candidates.extend([
+            session / "runner" / "status-board.md",
+            session / "status-board.md",
+        ])
+    phase_id = str(item.get("id") or item.get("phase_id") or "")
+    handoffs = root / "agent-handoffs"
+    if handoffs.exists() and phase_id:
+        candidates.extend(sorted(handoffs.glob(f"*{phase_id}*status*.md")))
+    if handoffs.exists():
+        candidates.extend(sorted(handoffs.glob("*-status.md"), key=lambda path: path.stat().st_mtime, reverse=True))
+    return [path for path in candidates if path.exists()]
+
+
+def checkpoint_sync_usage() -> str:
+    return "Usage: wily.py checkpoint-sync <phase-id> [--status-board path]"
+
+
+def command_checkpoint_sync(root: Path, args: list[str]) -> int:
+    phase_id = require_phase_id(args, "checkpoint-sync")
+    if not phase_id:
+        return 2
+    status_board: Path | None = None
+    index = 1
+    while index < len(args):
+        arg = args[index]
+        if arg == "--status-board":
+            try:
+                status_board = Path(args[index + 1])
+            except IndexError:
+                print("Missing value for --status-board", file=sys.stderr)
+                return 2
+            index += 2
+            continue
+        print(f"Unknown option: {arg}", file=sys.stderr)
+        print(checkpoint_sync_usage(), file=sys.stderr)
+        return 2
+
+    roadmap = load_roadmap(root)
+    item: Phase | None = find_phase(roadmap, phase_id)
+    if item is None:
+        found = find_stage_phase(root, roadmap, phase_id)
+        if found:
+            stage, phase, _stage_state = found
+            item = {**phase, "stage_id": stage.get("id", "")}
+    if item is None:
+        stage = find_stage(roadmap, phase_id)
+        if stage:
+            item = stage
+    if item is None:
+        print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
+        return 1
+
+    if status_board is None:
+        candidates = _status_board_candidates(root, item)
+        if not candidates:
+            print("No checkpoint status board found. Pass --status-board <path>.", file=sys.stderr)
+            return 1
+        status_board = candidates[0]
+    if not status_board.is_absolute():
+        status_board = root / status_board
+    if not status_board.exists():
+        print(f"Checkpoint status board not found: {status_board}", file=sys.stderr)
+        return 1
+
+    checkpoint = parse_checkpoint_status_board(status_board, root)
+    live_status = _checkpoint_live_status(checkpoint)
+    note = str(checkpoint.get("current_action") or checkpoint.get("blocker") or "")
+    existing = live_registries_for_item(root, item)
+    session_id = str(existing[0].get("session_id")) if existing else None
+    payload = write_live_registry(
+        root,
+        {**item, "checkpoint": checkpoint},
+        event="checkpoint_updated",
+        live_status=live_status,
+        note=note,
+        session_id=session_id,
+    )
+    event_payload = {**item, **payload, "id": item.get("id", phase_id), "checkpoint": checkpoint}
+    result = emit_board_live_event(root, event_payload, "checkpoint_updated", live_status, note)
+    sent, detail = result if isinstance(result, tuple) else (bool(result), "")
+    current = checkpoint.get("current") if isinstance(checkpoint.get("current"), dict) else {}
+    print(f"Checkpoint overlay synced for {phase_id}: {current.get('id', 'unknown')} ({live_status})")
+    if not sent:
+        suffix = f": {detail}" if detail else ""
+        print(f"Board checkpoint event not sent{suffix}", file=sys.stderr)
+    return 0
 
 
 def read_live_registry(path: Path) -> dict[str, Any] | None:
@@ -384,6 +665,8 @@ def write_live_registry(
         payload["started_at"] = existing.get("started_at") or payload["started_at"]
         if existing.get("last_worked_at") and event != "worked":
             payload["last_worked_at"] = existing["last_worked_at"]
+        if "checkpoint" not in payload and existing.get("checkpoint") is not None:
+            payload["checkpoint"] = existing["checkpoint"]
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     live_alive_path(root, str(payload["session_id"])).touch()
     return payload
@@ -1627,7 +1910,7 @@ def command_live_heartbeat(root: Path, args: list[str]) -> int:
     if not args:
         print(heartbeat_usage(), file=sys.stderr)
         return 2
-    if not board_live_enabled():
+    if not board_live_enabled(root):
         print(
             "Board live heartbeat requires WILY_BOARD_URL, WILY_BOARD_SECRET, WILY_BOARD_REPO, and WILY_BOARD_ACTOR.",
             file=sys.stderr,
@@ -1704,6 +1987,15 @@ def command_live_heartbeat(root: Path, args: list[str]) -> int:
     if not phase:
         print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
         return 1
+    active = resolve_active_live_payload(root, item_id=phase_id, session_id=session_id)
+    if active:
+        phase = {**phase}
+        if not session_id:
+            session_id = str(active.get("session_id") or "")
+        if active.get("session_path") and not phase.get("current_session"):
+            phase["current_session"] = active["session_path"]
+        if "checkpoint" in active and "checkpoint" not in phase:
+            phase["checkpoint"] = active["checkpoint"]
 
     sent = 0
     started = time.monotonic()
@@ -1807,6 +2099,8 @@ def command_live_worked(root: Path, args: list[str]) -> int:
         "tool": tool,
         "summary": summary,
     }
+    if "checkpoint" in active:
+        event_item["checkpoint"] = active["checkpoint"]
     payload = write_live_registry(
         root,
         event_item,
@@ -1888,6 +2182,58 @@ def command_hooks(root: Path, args: list[str]) -> int:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Installed {target} hook: {path}")
     return 0
+
+
+def board_usage() -> str:
+    return "Usage: wily.py board check [--hooks-path file]"
+
+
+def command_board(root: Path, args: list[str]) -> int:
+    if not args or args[0] != "check":
+        print(board_usage(), file=sys.stderr)
+        return 2
+    hooks_path = Path.home() / ".codex" / "hooks.json"
+    index = 1
+    while index < len(args):
+        option = args[index]
+        if option == "--hooks-path" and index + 1 < len(args):
+            hooks_path = Path(args[index + 1])
+            index += 2
+            continue
+        print(board_usage(), file=sys.stderr)
+        return 2
+
+    values = board_live_config_values(root)
+    missing = missing_board_live_config_keys(root)
+    ok = True
+    if missing:
+        ok = False
+        print("Board live config: missing")
+        print("Missing: " + ", ".join(missing))
+    else:
+        config = redacted_board_live_config(board_live_config(root) or {})
+        print("Board live config: ok")
+        print(f"url: {config.get('WILY_BOARD_URL', '')}")
+        print(f"repo: {config.get('WILY_BOARD_REPO', '')}")
+        print(f"actor: {config.get('WILY_BOARD_ACTOR', '')}")
+        print(f"agent: {config.get('WILY_BOARD_AGENT', '')}")
+        print(f"secret: {config.get('WILY_BOARD_SECRET', '<redacted>')}")
+
+    if values.get("WILY_BOARD_SECRET"):
+        probe = b'{"probe":"wily-board-check"}'
+        signature = board_live_signature(values["WILY_BOARD_SECRET"], probe)
+        print(f"signature: ready ({signature.split('=', 1)[0]})")
+    else:
+        print("signature: missing secret")
+
+    if codex_hook_installed(hooks_path):
+        print(f"Codex hook: ok ({hooks_path})")
+    else:
+        ok = False
+        print(f"Codex hook: missing ({hooks_path})")
+
+    print("endpoint: not probed")
+    return 0 if ok else 1
 
 
 def codex_bridge_should_emit_worked(notification: dict[str, Any]) -> bool:
@@ -2807,6 +3153,8 @@ def usage() -> str:
             "  release <phase-id>",
             "  live-heartbeat <phase-id> [--interval seconds] [--count n] [--note text]",
             "  live-worked [item-id] [--session id] [--agent name] [--from-hook]",
+            "  checkpoint-sync <phase-id> [--status-board path]",
+            "  board check [--hooks-path file]",
             "  hooks install --target codex|claude",
             "  codex-bridge --session id [--fixture jsonl]",
             "  retry <phase-id>",
@@ -2846,6 +3194,10 @@ def main(argv: list[str] | None = None) -> int:
         return command_live_heartbeat(root, args)
     if command == "live-worked":
         return command_live_worked(root, args)
+    if command == "checkpoint-sync":
+        return command_checkpoint_sync(root, args)
+    if command == "board":
+        return command_board(root, args)
     if command == "hooks":
         return command_hooks(root, args)
     if command == "codex-bridge":

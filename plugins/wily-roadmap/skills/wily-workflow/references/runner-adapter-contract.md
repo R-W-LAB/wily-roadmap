@@ -29,6 +29,25 @@ The active agent must route execution through:
 
 Custom Workflow owns phase implementation planning, progress tracking, bounded lane execution, and verification evidence. Wily owns phase lifecycle and final status transitions.
 
+## Checkpoint Live Overlay Contract
+
+Custom Workflow may publish an `agent-handoffs/*-status.md` status board while a Wily Phase is still running. Wily treats that board as a provisional runner overlay, not durable roadmap state.
+
+`wily.py checkpoint-sync <phase-id> --status-board <path>` reads the status board and attaches a `checkpoint` payload to the selected Phase's local live registry. When Wily Board live config is available, the same payload is signed and sent as a `checkpoint_updated` event to `/api/live/events`.
+
+Checkpoint payload shape:
+
+- `state`: runner state from the status board.
+- `progress`: `{done, total, percent}`.
+- `current`: current checkpoint `{id, title, status, owner, evidence}`.
+- `next`: next checkpoint with the same shape when present.
+- `current_action`: short active action text.
+- `blocker`: blocker text, empty when none.
+- `verification`: latest verification table row when present.
+- `rows`: compact checkpoint table rows for audit.
+
+Durable `.wily` Stage and Phase status remains authoritative. Completing all checkpoints never marks a Wily Phase `done`; final transition still requires verification evidence and `$wily-complete`, or `$wily-block` when blocked.
+
 ## Result Contract
 
 Custom Workflow writes its result to:
