@@ -11,6 +11,8 @@ If a final goal is supplied below, combine it with a repository scan when author
 
 The helper script is at `${CLAUDE_PLUGIN_ROOT}/scripts/wily.py init`. The skill owns repository inspection, user approval, phase design, and planner selection.
 
+Board reflection contract: after local `.wily` state changes, reflect Board live/provisional state when configured, record deterministic evidence, and use actual-site visual verification only for failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+
 User-supplied goal (may be empty):
 
 $ARGUMENTS

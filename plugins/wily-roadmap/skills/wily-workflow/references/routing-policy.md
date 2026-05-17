@@ -31,6 +31,7 @@ Use these labels in summaries when helpful:
 - Keep command routing fast. Do not invoke external planner adapters or run project verification while handling roadmap state commands.
 - Use planner adapters only after the user explicitly continues into phase implementation and the phase needs a detailed implementation plan.
 - Run verification only for implementation completion, and prefer the phase's focused verification over broad test suites.
+- For state-changing commands, apply the Board reflection contract after local `.wily` state changes: reflect live/provisional state when Board live config is available, record deterministic evidence, and surface a recovery command if Board reflection fails.
 
 ## Init Output
 
@@ -64,6 +65,8 @@ python3 <plugin-root>/scripts/wily.py block 04-1 "Reason"
 python3 <plugin-root>/scripts/wily.py retry 04-1
 python3 <plugin-root>/scripts/wily.py replan "Reason"
 python3 <plugin-root>/scripts/wily.py watch
+python3 <plugin-root>/scripts/wily.py board check --probe
+python3 <plugin-root>/scripts/wily.py board sync-local <stage-id>
 ```
 
 The helper does not replace agent judgment. It creates and reads files; the active agent still scans the repository, designs phases, asks for approval, implements approved work, and records verification.

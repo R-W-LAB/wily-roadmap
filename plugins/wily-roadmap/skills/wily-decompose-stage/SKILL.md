@@ -34,6 +34,15 @@ python3 <plugin-root>/scripts/wily.py decompose-stage <stage-id> --from-json <pa
 - Keep child Phase and lane details in `.wily/stages/<stage-id>/stage.yaml`; keep `.wily/roadmap.yaml` at Stage-level to reduce collaboration conflicts.
 - Keep existing phase-only roadmaps compatible.
 
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` after local Stage topology files are written.
+- Preserve durable `.wily` state first, then reflect or replay the `stage_decomposed_local` draft topology projection when Board live config is available.
+- Use `python3 <plugin-root>/scripts/wily.py board sync-local <stage-id>` to replay the local draft after fixing Board config or reachability.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
+
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.

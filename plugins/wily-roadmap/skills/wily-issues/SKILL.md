@@ -29,6 +29,14 @@ python3 <plugin-root>/scripts/wily.py issues --add-to-roadmap
 
 This updates only local `.wily` roadmap and phase files. It does not write to GitHub.
 
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` only when approved `--add-to-roadmap` changes local `.wily` roadmap state.
+- Preserve durable `.wily` state first, then reflect the related Board live/provisional projection when Board live config is available.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
+
 ## Boundaries
 
 - Keep `$wily-status`, `$wily-next`, and `$wily-start` GitHub-free by default.

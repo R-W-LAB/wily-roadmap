@@ -29,6 +29,14 @@ python3 <plugin-root>/scripts/wily.py complete <phase-id>
 
 Complete does not implement the phase or run broad verification by default. It closes a verified execution attempt.
 
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` after local completion/session state is written.
+- Preserve durable `.wily` state first, then reflect the Board-visible `completed_local` status when Board live config is available.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML in the response for this important transition.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
+
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.

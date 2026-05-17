@@ -202,7 +202,20 @@ def emit_board_live_event(
         "note": note,
         "client_time": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
-    for key in ("current_item_id", "draft_kind", "phases", "worked", "checkpoint"):
+    for key in (
+        "current_item_id",
+        "draft_kind",
+        "phases",
+        "worked",
+        "checkpoint",
+        "title",
+        "status",
+        "owner",
+        "depends_on",
+        "execution_mode",
+        "raw_path",
+        "position",
+    ):
         if key in phase:
             payload[key] = phase[key]
     if not payload["phase_id"]:
@@ -396,7 +409,13 @@ def live_registry_payload(
     return payload
 
 
-def live_draft_stage_decomposition_payload(root: Path, stage: Stage, phases: list[Phase]) -> Phase:
+def live_draft_stage_decomposition_payload(
+    root: Path,
+    stage: Stage,
+    phases: list[Phase],
+    *,
+    position: int | None = None,
+) -> Phase:
     stage_id = str(stage.get("id", ""))
     normalized_phases: list[dict[str, Any]] = []
     for phase in phases:
@@ -411,16 +430,25 @@ def live_draft_stage_decomposition_payload(root: Path, stage: Stage, phases: lis
                 "path": str(phase.get("path") or ""),
             }
         )
-    return {
+    payload: Phase = {
         "id": stage_id,
         "item_type": "stage",
         "item_id": stage_id,
         "stage_id": stage_id,
+        "title": str(stage.get("title") or stage_id),
+        "status": str(stage.get("status") or "pending"),
+        "owner": str(stage.get("owner") or ""),
+        "depends_on": [str(value) for value in stage.get("depends_on") or []],
+        "execution_mode": str(stage.get("execution_mode") or "decomposed"),
+        "raw_path": str(stage.get("path") or ""),
         "draft_kind": "stage_decomposition",
         "session_id": new_live_session_id(),
         "agent": live_agent(root),
         "phases": normalized_phases,
     }
+    if position is not None:
+        payload["position"] = position
+    return payload
 
 
 def _clean_markdown_cell(value: str) -> str:
@@ -2286,7 +2314,7 @@ def command_hooks(root: Path, args: list[str]) -> int:
 
 
 def board_usage() -> str:
-    return "Usage: wily.py board check [--hooks-path file] [--probe]"
+    return "Usage: wily.py board check [--hooks-path file] [--probe] | board sync-local <stage-id>"
 
 
 def probe_board_endpoint(values: dict[str, str]) -> str:
@@ -2320,7 +2348,12 @@ def probe_board_endpoint(values: dict[str, str]) -> str:
 
 
 def command_board(root: Path, args: list[str]) -> int:
-    if not args or args[0] != "check":
+    if not args:
+        print(board_usage(), file=sys.stderr)
+        return 2
+    if args[0] == "sync-local":
+        return command_board_sync_local(root, args[1:])
+    if args[0] != "check":
         print(board_usage(), file=sys.stderr)
         return 2
     hooks_path = Path.home() / ".codex" / "hooks.json"
@@ -2619,7 +2652,29 @@ def write_decomposed_stage_phase_files(root: Path, stage: Stage, phases: list[Ph
         (folder / "notes.md").write_text("# Notes\n\nCreated by stage decomposition.\n", encoding="utf-8")
 
 
-def emit_stage_decomposition_live_draft(root: Path, stage: Stage, phases: list[Phase]) -> None:
+def stage_position(roadmap: dict[str, Any], stage_id: str) -> int | None:
+    for index, stage in enumerate(roadmap.get("stages") or [], start=1):
+        if str(stage.get("id")) == stage_id:
+            return index
+    return None
+
+
+def warn_stage_decomposition_board_recovery(stage_id: str) -> None:
+    print(
+        "Board reflection recovery: run `wily board check --probe`, then "
+        f"`wily board sync-local {stage_id}` after fixing Board config or reachability; "
+        "actual-site verification remains incomplete.",
+        file=sys.stderr,
+    )
+
+
+def emit_stage_decomposition_live_draft(
+    root: Path,
+    stage: Stage,
+    phases: list[Phase],
+    *,
+    position: int | None = None,
+) -> BoardLiveEventResult:
     stage_id = str(stage.get("id", "unknown"))
     if not board_live_enabled(root):
         missing = ", ".join(missing_board_live_config_keys(root))
@@ -2627,8 +2682,9 @@ def emit_stage_decomposition_live_draft(root: Path, stage: Stage, phases: list[P
             f"Board live draft not sent: missing Wily Board live config ({missing}).",
             file=sys.stderr,
         )
-        return
-    draft_payload = live_draft_stage_decomposition_payload(root, stage, phases)
+        warn_stage_decomposition_board_recovery(stage_id)
+        return False, "missing config"
+    draft_payload = live_draft_stage_decomposition_payload(root, stage, phases, position=position)
     result = emit_board_live_event(root, draft_payload, "stage_decomposed_local", "active")
     ok = result[0] if isinstance(result, tuple) else bool(result)
     detail = result[1] if isinstance(result, tuple) and len(result) > 1 else ""
@@ -2637,6 +2693,35 @@ def emit_stage_decomposition_live_draft(root: Path, stage: Stage, phases: list[P
     else:
         suffix = f" ({detail})" if detail else ""
         print(f"Board live draft failed for {stage_id}: Wily Board event was not stored{suffix}.", file=sys.stderr)
+        warn_stage_decomposition_board_recovery(stage_id)
+    return result
+
+
+def command_board_sync_local(root: Path, args: list[str]) -> int:
+    stage_id = args[0] if args else ""
+    if not stage_id:
+        print("Usage: wily.py board sync-local <stage-id>", file=sys.stderr)
+        return 2
+    roadmap = load_roadmap(root)
+    stage = find_stage(roadmap, stage_id)
+    if not stage:
+        print(f"Stage not found: {stage_id}", file=sys.stderr)
+        return 1
+    stage_state = load_stage_state(root, stage)
+    phases = stage_state.get("phases") or []
+    if not phases:
+        print(f"No local decomposed phases found for {stage_id}", file=sys.stderr)
+        return 1
+    result = emit_stage_decomposition_live_draft(
+        root,
+        stage,
+        phases,
+        position=stage_position(roadmap, stage_id),
+    )
+    ok = result[0] if isinstance(result, tuple) else bool(result)
+    if ok:
+        print(f"Board local draft synced for {stage_id}: {len(phases)} phases")
+    return 0
 
 
 def command_decompose_stage(root: Path, args: list[str]) -> int:
@@ -2675,7 +2760,7 @@ def command_decompose_stage(root: Path, args: list[str]) -> int:
             stage.pop("phases", None)
             write_decomposed_stage_phase_files(root, stage, phases)
             save_roadmap(root, roadmap)
-            emit_stage_decomposition_live_draft(root, stage, phases)
+            emit_stage_decomposition_live_draft(root, stage, phases, position=stage_position(roadmap, stage_id))
             print(f"Decomposed stage {stage_id}")
             print(f"Stage path: {state_dir(root) / str(stage.get('path'))}")
         return 0
@@ -2685,7 +2770,7 @@ def command_decompose_stage(root: Path, args: list[str]) -> int:
     stage.pop("phases", None)
     write_decomposed_stage_phase_files(root, stage, phases)
     save_roadmap(root, roadmap)
-    emit_stage_decomposition_live_draft(root, stage, phases)
+    emit_stage_decomposition_live_draft(root, stage, phases, position=stage_position(roadmap, stage_id))
     print(f"Decomposed stage {stage_id}")
     print(f"Stage path: {state_dir(root) / str(stage.get('path'))}")
     return 0
@@ -3308,6 +3393,7 @@ def usage() -> str:
             "  live-worked [item-id] [--session id] [--agent name] [--from-hook]",
             "  checkpoint-sync <phase-id> [--status-board path]",
             "  board check [--hooks-path file] [--probe]",
+            "  board sync-local <stage-id>",
             "  hooks install --target codex|claude",
             "  codex-bridge --session id [--fixture jsonl]",
             "  retry <phase-id>",

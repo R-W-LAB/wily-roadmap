@@ -15,6 +15,8 @@ Wily owns the Roadmap Plan. Stage is the primary collaboration and merge-boundar
 
 When a repository shares Wily state through Git, Wily should guide collaborators toward a lightweight source-of-truth split: commit durable roadmap state, keep active execution sessions local, pull before claiming phases, and commit/push roadmap progress only when the user has approved remote work.
 
+Board reflection contract: state-changing Wily commands update local `.wily` state first, then reflect live/provisional state to Wily Board when live config is available, verify with deterministic evidence, and escalate to actual-site visual verification only under the rules in `references/board-reflection-contract.md`.
+
 ## First Move
 
 1. Read every applicable `AGENTS.md`.
@@ -84,6 +86,8 @@ The script handles repeatable filesystem work such as `init`, `status`, `next`, 
 
 `$wily-replan` keeps completed phases as history and revises only future or in-progress work unless the user explicitly requests a deeper reset.
 
+For state-changing commands, follow the Board reflection contract in `references/board-reflection-contract.md`: local `.wily` is authoritative, Board reflection is best-effort/provisional, failures preserve local state and surface a recovery command, and actual-site visual verification is required only for deterministic failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+
 ## State Model
 
 Each project owns this local state:
@@ -146,6 +150,8 @@ superseded
 
 Status summaries translate these markers only for display. Keep stored roadmap status values in English.
 
+Stage and Phase human-readable content should be Korean unless the user explicitly asks for another language. This includes titles, purpose/scope, task descriptions, prompts, verification notes, handoffs, and notes. Keep machine-facing field names, status values, ids, file paths, and commands in English.
+
 ## Operating Rules
 
 - Prefer local completion. Do not push, open PRs, merge, delete user work, or run destructive commands unless the user explicitly asks.
@@ -175,6 +181,8 @@ Read detailed policy only when needed:
 
 - Roadmap routing and command classification: `references/routing-policy.md`
 - Phase and roadmap structure: `references/planning-style.md`
+- Board reflection contract: `references/board-reflection-contract.md`
+- Board operations: `references/board-operations.md`
 - Phase/session execution: `references/commit-policy.md`
 - Remote and destructive action policy: `references/pr-policy.md`
 - Quiet user-facing responses: `references/response-style.md`

@@ -47,7 +47,17 @@ python3 <plugin-root>/scripts/wily.py init "<goal>"
 
 - Unless the user explicitly asks for another language, author Roadmap Plan content in Korean.
 - Use Korean for Stage titles and generated `stage.md`, `prompt.md`, `verification.md`, and `handoff.md` prose.
+- Use Korean for Stage and Phase human-readable content such as titles, purpose/scope, task descriptions, prompts, verification notes, handoffs, and notes.
 - Keep YAML field names and status values in English for tool compatibility.
+- Keep machine-facing field names, status values, ids, file paths, and commands in English.
+
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` after local `.wily` init or roadmap authoring changes.
+- Preserve durable `.wily` state first, then reflect the related Board live/provisional projection when live config is available.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
 
 ## Mature Repository Contract
 

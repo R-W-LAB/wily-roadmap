@@ -23,10 +23,17 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import wily  # noqa: E402
 import wily_state_summary  # noqa: E402
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+ISOLATED_BOARD_ENV = {
+    "WILY_BOARD_USER_CONFIG": str(Path(tempfile.gettempdir()) / "wily-board-test-missing.json")
+}
 
 
 def strip_ansi(value: str) -> str:
     return ANSI_RE.sub("", value)
+
+
+def isolated_env(**values: str) -> dict[str, str]:
+    return {**ISOLATED_BOARD_ENV, **values}
 
 
 class WatchInputTest(unittest.TestCase):
@@ -155,6 +162,7 @@ class WilyCliTest(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
+            env={**os.environ, **ISOLATED_BOARD_ENV},
         )
 
     def run_wily_with_env(
@@ -170,7 +178,7 @@ class WilyCliTest(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
-            env={**os.environ, **env},
+            env={**os.environ, **ISOLATED_BOARD_ENV, **env},
         )
 
     def run_launcher(
@@ -188,7 +196,7 @@ class WilyCliTest(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
-            env={**os.environ, **(env or {})},
+            env={**os.environ, **ISOLATED_BOARD_ENV, **(env or {})},
         )
 
     def create_state(self, project: Path) -> Path:
@@ -856,7 +864,7 @@ class WilyCliTest(unittest.TestCase):
             )
             stderr = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stderr", stderr), patch.object(
+            with patch.dict(os.environ, isolated_env(), clear=True), patch("sys.stderr", stderr), patch.object(
                 wily, "emit_board_live_event"
             ) as emit:
                 result = wily.command_decompose_stage(project, ["s01-mvp0", "--from-json", str(proposal)])
@@ -890,6 +898,67 @@ class WilyCliTest(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertIn("Board live draft failed for s01-mvp0", stderr.getvalue())
+            self.assertIn("wily board sync-local s01-mvp0", stderr.getvalue())
+            self.assertIn("actual-site verification remains incomplete", stderr.getvalue())
+
+    def test_board_sync_local_replays_existing_decomposed_stage_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_stage_roadmap(project)
+            proposal = project / "decomposition.json"
+            proposal.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "s01-custom",
+                            "title": "Custom user-authored phase",
+                            "status": "pending",
+                            "depends_on": [],
+                            "owner": "codex",
+                            "task": "split the work",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"WILY_BOARD_USER_CONFIG": str(project / "missing-board.json")}, clear=True):
+                self.assertEqual(wily.command_decompose_stage(project, ["s01-mvp0", "--from-json", str(proposal)]), 0)
+
+            emitted: list[tuple[dict, str, str, str]] = []
+
+            def record_event(root: Path, item: dict, event: str, live_status: str, note: str = "") -> tuple[bool, str]:
+                emitted.append((item, event, live_status, note))
+                return True, ""
+
+            stdout = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                    "WILY_BOARD_AGENT": "codex",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event), patch("sys.stdout", stdout):
+                result = wily.command_board(project, ["sync-local", "s01-mvp0"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(len(emitted), 1)
+            payload, event, live_status, note = emitted[0]
+            self.assertEqual(event, "stage_decomposed_local")
+            self.assertEqual(live_status, "active")
+            self.assertEqual(note, "")
+            self.assertEqual(payload["stage_id"], "s01-mvp0")
+            self.assertEqual(payload["title"], "MVP 0 loop")
+            self.assertEqual(payload["status"], "pending")
+            self.assertEqual(payload["depends_on"], ["s00-foundation"])
+            self.assertEqual(payload["execution_mode"], "decomposed")
+            self.assertEqual(payload["raw_path"], "stages/s01-mvp0")
+            self.assertEqual(payload["position"], 2)
+            self.assertEqual(payload["phases"][0]["id"], "s01-custom")
+            self.assertIn("Board local draft synced for s01-mvp0: 1 phases", stdout.getvalue())
 
     def test_decompose_stage_from_json_rejects_empty_decomposition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2049,7 +2118,7 @@ class WilyCliTest(unittest.TestCase):
             project = Path(tmp)
             self.write_ready_phase(project)
 
-            with patch.dict(os.environ, {}, clear=True), patch.object(wily, "emit_board_live_event") as emit:
+            with patch.dict(os.environ, isolated_env(), clear=True), patch.object(wily, "emit_board_live_event") as emit:
                 result = wily.command_start(project, ["01"])
 
             self.assertEqual(result, 0)
@@ -2115,7 +2184,7 @@ class WilyCliTest(unittest.TestCase):
             self.write_ready_phase(project)
             stderr = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stderr", stderr):
+            with patch.dict(os.environ, isolated_env(), clear=True), patch("sys.stderr", stderr):
                 result = wily.command_start(project, ["01"])
 
             self.assertEqual(result, 0)
@@ -2151,7 +2220,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             stderr = io.StringIO()
 
@@ -2177,7 +2246,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             stderr = io.StringIO()
 
@@ -2203,7 +2272,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             stderr = io.StringIO()
 
@@ -2229,7 +2298,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             active_file = next(
                 (project / ".wily" / "local" / "live" / "active").glob("*.json")
@@ -2261,11 +2330,11 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             stdout = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout):
+            with patch.dict(os.environ, isolated_env(), clear=True), patch("sys.stdout", stdout):
                 result = wily.command_status(project)
 
             self.assertEqual(result, 0)
@@ -2290,7 +2359,7 @@ class WilyCliTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 config = wily.board_live_config(project)
 
             self.assertEqual(config["WILY_BOARD_URL"], "https://board.local")
@@ -2317,7 +2386,7 @@ class WilyCliTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 config = wily.board_live_config(project)
 
             self.assertEqual(config["WILY_BOARD_URL"], "https://board.local")
@@ -2333,7 +2402,7 @@ class WilyCliTest(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            with patch.dict(os.environ, isolated_env(), clear=True), patch("sys.stdout", stdout), patch("sys.stderr", stderr):
                 result = wily.command_board(project, ["check", "--hooks-path", str(hooks_path)])
 
             self.assertEqual(result, 1)
@@ -2362,7 +2431,7 @@ class WilyCliTest(unittest.TestCase):
             self.assertEqual(wily.command_hooks(project, ["install", "--target", "codex", "--path", str(hooks_path)]), 0)
             stdout = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout):
+            with patch.dict(os.environ, isolated_env(), clear=True), patch("sys.stdout", stdout):
                 result = wily.command_board(project, ["check", "--hooks-path", str(hooks_path)])
 
             output = stdout.getvalue()
@@ -2474,7 +2543,7 @@ class WilyCliTest(unittest.TestCase):
             )
             stdout = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch.object(
+            with patch.dict(os.environ, isolated_env(), clear=True), patch.object(
                 wily, "probe_board_endpoint", return_value="ok (HTTP 200)"
             ), patch("sys.stdout", stdout):
                 result = wily.command_board(
@@ -2507,7 +2576,7 @@ class WilyCliTest(unittest.TestCase):
             )
             stdout = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch.object(
+            with patch.dict(os.environ, isolated_env(), clear=True), patch.object(
                 wily, "probe_board_endpoint"
             ) as probe, patch("sys.stdout", stdout):
                 result = wily.command_board(
@@ -2525,7 +2594,7 @@ class WilyCliTest(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch.object(
+            with patch.dict(os.environ, isolated_env(), clear=True), patch.object(
                 wily, "probe_board_endpoint"
             ) as probe, patch("sys.stdout", stdout), patch("sys.stderr", stderr):
                 result = wily.command_board(
@@ -2624,7 +2693,7 @@ class WilyCliTest(unittest.TestCase):
             wily._record_board_emit_result(project, "worked", False, "HTTP 502")
             stdout = io.StringIO()
 
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout):
+            with patch.dict(os.environ, isolated_env(), clear=True), patch("sys.stdout", stdout):
                 result = wily.command_board(
                     project, ["check", "--hooks-path", str(hooks_path)]
                 )
@@ -2639,7 +2708,7 @@ class WilyCliTest(unittest.TestCase):
             project = Path(tmp)
             self.write_ready_phase(project)
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 result = wily.command_start(project, ["01"])
 
             self.assertEqual(result, 0)
@@ -2684,12 +2753,12 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
             session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 result = wily.command_complete(project, ["01"])
 
             self.assertEqual(result, 0)
@@ -2700,7 +2769,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
             session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
@@ -2732,7 +2801,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
             session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
@@ -2764,7 +2833,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
 
             result = wily.command_release(project, ["01"])
@@ -2785,7 +2854,7 @@ class WilyCliTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 result = wily.command_start(project, ["01"])
 
             self.assertEqual(result, 0)
@@ -2797,7 +2866,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
 
             result = wily.command_live_worked(project, ["01", "--agent", "codex", "--tool", "Edit"])
@@ -3086,7 +3155,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
             session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
@@ -3111,7 +3180,7 @@ class WilyCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             self.write_ready_phase(project)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 self.assertEqual(wily.command_start(project, ["01"]), 0)
             active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
             session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
@@ -3354,7 +3423,7 @@ class WilyCliTest(unittest.TestCase):
             project = Path(tmp)
             self.write_ready_phase(project)
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, isolated_env(), clear=True):
                 result = wily.command_live_heartbeat(project, ["01", "--count", "1"])
 
             self.assertEqual(result, 1)
@@ -3381,7 +3450,7 @@ class WilyCliTest(unittest.TestCase):
             def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> None:
                 emitted.append((str(phase["id"]), event, live_status))
 
-            with patch.dict(os.environ, {}, clear=True), patch.object(
+            with patch.dict(os.environ, isolated_env(), clear=True), patch.object(
                 wily, "emit_board_live_event", side_effect=record_event
             ):
                 result = wily.command_live_heartbeat(project, ["01", "--count", "1"])

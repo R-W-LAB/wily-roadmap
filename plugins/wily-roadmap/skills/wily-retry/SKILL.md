@@ -23,6 +23,14 @@ python3 <plugin-root>/scripts/wily.py retry <phase-id>
 - Read the new `session/input.md` before continuing.
 - Keep the new attempt scoped to the same phase unless the roadmap is explicitly replanned.
 
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` after local retry/session state is written.
+- Preserve durable `.wily` state first, then reflect the retry/claim live projection when Board live config is available.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
+
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.

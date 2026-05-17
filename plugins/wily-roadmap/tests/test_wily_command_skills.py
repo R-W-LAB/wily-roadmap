@@ -35,6 +35,17 @@ MUTATING_COMMANDS = {
     "wily-decompose-stage",
     "wily-update",
 }
+WILY_STATE_CHANGING_COMMANDS = {
+    "wily-init",
+    "wily-start",
+    "wily-run",
+    "wily-decompose-stage",
+    "wily-complete",
+    "wily-block",
+    "wily-retry",
+    "wily-replan",
+    "wily-issues",
+}
 READONLY_COMMANDS = {"wily-status", "wily-watch", "wily-issues", "wily-next"}
 QUIET_RESPONSE_PHRASE = "Do not echo internal helper commands in normal user-facing responses."
 
@@ -219,6 +230,118 @@ class WilyCommandSkillsTest(unittest.TestCase):
             text,
         )
         self.assertIn("Keep YAML field names and status values in English", text)
+
+    def test_stage_and_phase_authoring_requires_korean_human_content(self) -> None:
+        workflow = (ROOT / "skills" / "wily-workflow" / "SKILL.md").read_text(encoding="utf-8")
+        planning = (
+            ROOT / "skills" / "wily-workflow" / "references" / "planning-style.md"
+        ).read_text(encoding="utf-8")
+        init = self.skill_text("wily-init")
+
+        for text in (workflow, planning, init):
+            with self.subTest(source=text[:30]):
+                self.assertIn("Stage and Phase human-readable content", text)
+                self.assertIn("Korean", text)
+                self.assertIn("machine-facing", text)
+
+    def test_workflow_documents_board_reflection_contract(self) -> None:
+        workflow = (ROOT / "skills" / "wily-workflow" / "SKILL.md").read_text(encoding="utf-8")
+        contract = (
+            ROOT / "skills" / "wily-workflow" / "references" / "board-reflection-contract.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Board reflection contract", workflow)
+        self.assertIn("references/board-reflection-contract.md", workflow)
+        required = (
+            "Durable `.wily` state remains authoritative",
+            "check Board live config",
+            "emit or replay",
+            "deterministic evidence",
+            "API",
+            "SSE",
+            "SSR HTML",
+            "actual production Board site",
+            "https://rnwlab.duckdns.org",
+            "user's Chrome",
+            "temporary verification session",
+            "delete",
+            "wily board check --probe",
+            "wily board sync-local <stage-id>",
+            "must not roll back",
+        )
+        for phrase in required:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, contract)
+
+    def test_state_changing_skills_reference_board_reflection_contract(self) -> None:
+        required = (
+            "Board reflection contract",
+            "references/board-reflection-contract.md",
+            "deterministic evidence",
+            "actual-site visual verification",
+            "recovery command",
+        )
+        for command in WILY_STATE_CHANGING_COMMANDS:
+            text = self.skill_text(command)
+            for phrase in required:
+                with self.subTest(command=command, phrase=phrase):
+                    self.assertIn(phrase, text)
+
+    def test_state_changing_command_docs_reference_board_reflection_contract(self) -> None:
+        required = (
+            "Board reflection contract",
+            "deterministic evidence",
+            "actual-site visual verification",
+        )
+        for command in WILY_STATE_CHANGING_COMMANDS:
+            command_doc = command.removeprefix("wily-")
+            text = (ROOT / "commands" / f"{command_doc}.md").read_text(encoding="utf-8")
+            for phrase in required:
+                with self.subTest(command=command, phrase=phrase):
+                    self.assertIn(phrase, text)
+
+    def test_wily_run_and_runner_adapter_require_checkpoint_board_sync(self) -> None:
+        skill = self.skill_text("wily-run")
+        runner = (
+            ROOT / "skills" / "wily-workflow" / "references" / "runner-adapter-contract.md"
+        ).read_text(encoding="utf-8")
+
+        for text in (skill, runner):
+            with self.subTest(source=text[:30]):
+                self.assertIn("checkpoint-sync", text)
+                self.assertIn("checkpoint_updated", text)
+                self.assertIn("Board reflection contract", text)
+                self.assertIn("deterministic evidence", text)
+                self.assertIn("actual-site visual verification", text)
+
+    def test_wily_decompose_stage_requires_topology_replay_and_verification(self) -> None:
+        skill = self.skill_text("wily-decompose-stage")
+        command = (ROOT / "commands" / "decompose-stage.md").read_text(encoding="utf-8")
+
+        for text in (skill, command):
+            with self.subTest(source=text[:30]):
+                self.assertIn("stage_decomposed_local", text)
+                self.assertIn("wily.py board sync-local <stage-id>", text)
+                self.assertIn("deterministic evidence", text)
+
+    def test_board_operations_reference_documents_end_to_end_procedure(self) -> None:
+        ops = (
+            ROOT / "skills" / "wily-workflow" / "references" / "board-operations.md"
+        ).read_text(encoding="utf-8")
+        required = (
+            "check live config",
+            "emit or replay",
+            "API",
+            "SSE",
+            "SSR HTML",
+            "actual-site visual verification",
+            "Chrome",
+            "temporary verification session",
+            "clean up",
+        )
+        for phrase in required:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, ops)
 
     def test_wily_init_documents_mature_repo_contract(self) -> None:
         text = self.skill_text("wily-init")

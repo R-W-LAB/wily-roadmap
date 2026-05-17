@@ -18,6 +18,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import wily_watch_ui
 
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+ISOLATED_BOARD_ENV = {
+    "WILY_BOARD_USER_CONFIG": str(Path(tempfile.gettempdir()) / "wily-watch-board-test-missing.json")
+}
 
 
 def cell_width(text: str) -> int:
@@ -801,7 +804,7 @@ class RenderWatchTest(unittest.TestCase):
             project = Path(tmp)
             self._make(project, body)
 
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, ISOLATED_BOARD_ENV, clear=True):
                 out = wily_watch_ui.render_watch(project, interval=2.0, rich=False, size=(110, 12))
 
             self.assertIn("Board bridge not connected", out)

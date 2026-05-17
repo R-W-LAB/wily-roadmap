@@ -43,6 +43,8 @@ python3 <plugin-root>/scripts/wily.py run <phase-id> [--runner custom-workflow] 
 - after Custom Workflow finishes, copy or ensure its summary, changed files, verification evidence, blocker text, and recommended Wily status are in `custom-workflow-result.md`
 - never mark the Wily phase `done`
 
+Custom Workflow checkpoint/status-board updates should be reflected to Board through `checkpoint-sync` or an equivalent helper path. The Board event is `checkpoint_updated`, and the runner should retain deterministic evidence from the emit result, API, SSE, or SSR HTML.
+
 The Wily plugin does not bundle Custom Workflow implementation files and does not require bundled runner files. It routes the active agent to the installed `custom-workflow-skillset` plugin by skill name. Custom Workflow may recommend `needs_review`, `blocked`, `ready`, or `done`, but Wily completion still requires verification evidence and `$wily-complete`.
 
 ## Boundaries
@@ -56,6 +58,14 @@ The helper script prepares routing artifacts and prints the required Codex skill
 - `yolo`: use only when explicitly requested for a safe repository; hard stops still apply for broad destructive commands, payments, credential exposure, forbidden actions, and repeated verification failure without new evidence.
 
 Remote actions and destructive actions remain approval-first in every mode.
+
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` after local run/session and Custom Workflow routing artifacts are written.
+- Preserve durable `.wily` state first, then reflect the run/checkpoint live projection when Board live config is available.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
 
 ## Response Style
 

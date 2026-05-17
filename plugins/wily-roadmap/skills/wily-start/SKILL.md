@@ -33,6 +33,14 @@ python3 <plugin-root>/scripts/wily.py start <phase-id>
 - Do not run verification for the phase implementation.
 - Do not invoke phase planner adapters while handling the start command.
 
+## Board Reflection Contract
+
+- Follow the Board reflection contract in `references/board-reflection-contract.md` after the local start/session state is written.
+- Preserve durable `.wily` state first, then reflect the start/claim live projection when Board live config is available.
+- Record deterministic evidence such as emit result, API, SSE, or SSR HTML.
+- Use actual-site visual verification only for Board failures, mismatches, explicit visual requests, or Board UI/rendering changes.
+- If reflection fails, warn with the changed Wily state, failed projection, recovery command, and whether actual-site visual verification remains incomplete.
+
 ## Response Style
 
 - When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.

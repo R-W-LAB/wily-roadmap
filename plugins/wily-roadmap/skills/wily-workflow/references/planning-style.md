@@ -55,6 +55,10 @@ superseded
 
 Status output may translate these markers for the user, but roadmap files should keep the English status values above.
 
+## Authoring Language
+
+Stage and Phase human-readable content should be Korean unless the user explicitly asks for another language. This includes titles, purpose/scope, task descriptions, prompts, verification notes, handoffs, and notes in `stage.md`, `phase.md`, `prompt.md`, `verification.md`, `handoff.md`, and `notes.md`. Keep machine-facing field names, status values, ids, file paths, and commands in English.
+
 ## Stage Folder Format
 
 Each Stage should have:
