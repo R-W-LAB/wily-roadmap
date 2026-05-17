@@ -2245,7 +2245,37 @@ def command_hooks(root: Path, args: list[str]) -> int:
 
 
 def board_usage() -> str:
-    return "Usage: wily.py board check [--hooks-path file]"
+    return "Usage: wily.py board check [--hooks-path file] [--probe]"
+
+
+def probe_board_endpoint(values: dict[str, str]) -> str:
+    url = values.get("WILY_BOARD_URL", "").rstrip("/")
+    secret = values.get("WILY_BOARD_SECRET", "")
+    repo = values.get("WILY_BOARD_REPO", "")
+    actor = values.get("WILY_BOARD_ACTOR", "")
+    if not (url and secret and repo):
+        return "skipped (missing config)"
+    query = urllib.parse.urlencode(
+        {"repo": repo, "phase_id": "__probe__", "actor": actor}
+    )
+    request = urllib.request.Request(
+        f"{url}/api/live/claims?{query}",
+        method="GET",
+        headers={"X-Wily-Signature": board_live_signature(secret, b"")},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return f"ok (HTTP {response.status})"
+    except urllib.error.HTTPError as exc:
+        if 400 <= exc.code < 500:
+            return f"rejected (HTTP {exc.code})"
+        if 500 <= exc.code < 600:
+            return f"server error (HTTP {exc.code})"
+        return f"unexpected (HTTP {exc.code})"
+    except urllib.error.URLError as exc:
+        return f"unreachable ({exc.reason})"
+    except OSError as exc:
+        return f"unreachable ({exc})"
 
 
 def command_board(root: Path, args: list[str]) -> int:
@@ -2253,12 +2283,17 @@ def command_board(root: Path, args: list[str]) -> int:
         print(board_usage(), file=sys.stderr)
         return 2
     hooks_path = Path.home() / ".codex" / "hooks.json"
+    probe_requested = False
     index = 1
     while index < len(args):
         option = args[index]
         if option == "--hooks-path" and index + 1 < len(args):
             hooks_path = Path(args[index + 1])
             index += 2
+            continue
+        if option == "--probe":
+            probe_requested = True
+            index += 1
             continue
         print(board_usage(), file=sys.stderr)
         return 2
@@ -2292,7 +2327,12 @@ def command_board(root: Path, args: list[str]) -> int:
         ok = False
         print(f"Codex hook: missing ({hooks_path})")
 
-    print("endpoint: not probed")
+    if probe_requested and not missing:
+        print(f"endpoint: {probe_board_endpoint(values)}")
+    elif probe_requested:
+        print("endpoint: not probed (config missing)")
+    else:
+        print("endpoint: not probed")
     return 0 if ok else 1
 
 
@@ -3214,7 +3254,7 @@ def usage() -> str:
             "  live-heartbeat <phase-id> [--interval seconds] [--count n] [--note text]",
             "  live-worked [item-id] [--session id] [--agent name] [--from-hook]",
             "  checkpoint-sync <phase-id> [--status-board path]",
-            "  board check [--hooks-path file]",
+            "  board check [--hooks-path file] [--probe]",
             "  hooks install --target codex|claude",
             "  codex-bridge --session id [--fixture jsonl]",
             "  retry <phase-id>",

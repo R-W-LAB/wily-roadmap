@@ -10,7 +10,8 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+import urllib.error
 from pathlib import Path
 
 
@@ -2373,6 +2374,168 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn("secret: <redacted>", output)
             self.assertIn("Codex hook: ok", output)
             self.assertNotIn("do-not-print", output)
+
+    def _probe_response(self, status: int) -> MagicMock:
+        response = MagicMock()
+        response.status = status
+        response.__enter__ = MagicMock(return_value=response)
+        response.__exit__ = MagicMock(return_value=None)
+        return response
+
+    def test_probe_board_endpoint_returns_ok_on_2xx_response(self) -> None:
+        values = {
+            "WILY_BOARD_URL": "https://board.example",
+            "WILY_BOARD_SECRET": "secret",
+            "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+            "WILY_BOARD_ACTOR": "airmang",
+        }
+
+        with patch("urllib.request.urlopen", return_value=self._probe_response(200)):
+            result = wily.probe_board_endpoint(values)
+
+        self.assertEqual(result, "ok (HTTP 200)")
+
+    def test_probe_board_endpoint_returns_rejected_on_4xx_http_error(self) -> None:
+        values = {
+            "WILY_BOARD_URL": "https://board.example",
+            "WILY_BOARD_SECRET": "secret",
+            "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+            "WILY_BOARD_ACTOR": "airmang",
+        }
+        http_error = urllib.error.HTTPError(
+            url="https://board.example/api/live/claims",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,
+            fp=None,
+        )
+
+        with patch("urllib.request.urlopen", side_effect=http_error):
+            result = wily.probe_board_endpoint(values)
+
+        self.assertIn("rejected", result)
+        self.assertIn("401", result)
+
+    def test_probe_board_endpoint_returns_server_error_on_5xx_http_error(self) -> None:
+        values = {
+            "WILY_BOARD_URL": "https://board.example",
+            "WILY_BOARD_SECRET": "secret",
+            "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+            "WILY_BOARD_ACTOR": "airmang",
+        }
+        http_error = urllib.error.HTTPError(
+            url="https://board.example/api/live/claims",
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,
+            fp=None,
+        )
+
+        with patch("urllib.request.urlopen", side_effect=http_error):
+            result = wily.probe_board_endpoint(values)
+
+        self.assertIn("server error", result)
+        self.assertIn("503", result)
+
+    def test_probe_board_endpoint_returns_unreachable_on_url_error(self) -> None:
+        values = {
+            "WILY_BOARD_URL": "https://board.example",
+            "WILY_BOARD_SECRET": "secret",
+            "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+            "WILY_BOARD_ACTOR": "airmang",
+        }
+
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Name or service not known")):
+            result = wily.probe_board_endpoint(values)
+
+        self.assertIn("unreachable", result)
+        self.assertIn("Name or service not known", result)
+
+    def test_board_check_probe_prints_endpoint_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = project / ".wily"
+            state.mkdir()
+            (state / "board.json").write_text(
+                json.dumps(
+                    {
+                        "url": "https://board.local",
+                        "secret": "secret",
+                        "repo": "R-W-LAB/wily-roadmap",
+                        "actor": "airmang",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            hooks_path = project / "hooks.json"
+            self.assertEqual(
+                wily.command_hooks(project, ["install", "--target", "codex", "--path", str(hooks_path)]),
+                0,
+            )
+            stdout = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                wily, "probe_board_endpoint", return_value="ok (HTTP 200)"
+            ), patch("sys.stdout", stdout):
+                result = wily.command_board(
+                    project, ["check", "--probe", "--hooks-path", str(hooks_path)]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("endpoint: ok (HTTP 200)", stdout.getvalue())
+
+    def test_board_check_without_probe_keeps_not_probed_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            state = project / ".wily"
+            state.mkdir()
+            (state / "board.json").write_text(
+                json.dumps(
+                    {
+                        "url": "https://board.local",
+                        "secret": "secret",
+                        "repo": "R-W-LAB/wily-roadmap",
+                        "actor": "airmang",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            hooks_path = project / "hooks.json"
+            self.assertEqual(
+                wily.command_hooks(project, ["install", "--target", "codex", "--path", str(hooks_path)]),
+                0,
+            )
+            stdout = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                wily, "probe_board_endpoint"
+            ) as probe, patch("sys.stdout", stdout):
+                result = wily.command_board(
+                    project, ["check", "--hooks-path", str(hooks_path)]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("endpoint: not probed", stdout.getvalue())
+            probe.assert_not_called()
+
+    def test_board_check_probe_skips_when_config_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            hooks_path = project / "hooks.json"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                wily, "probe_board_endpoint"
+            ) as probe, patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+                result = wily.command_board(
+                    project, ["check", "--probe", "--hooks-path", str(hooks_path)]
+                )
+
+            self.assertEqual(result, 1)
+            combined = stdout.getvalue() + stderr.getvalue()
+            self.assertIn("endpoint: not probed", combined)
+            probe.assert_not_called()
 
     def test_start_writes_live_active_registry_without_board_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
