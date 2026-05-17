@@ -192,6 +192,24 @@ def emit_board_live_event(
         return False, f"network error: {exc}"
 
 
+def _surface_emit_failure(event: str, result: BoardLiveEventResult | None) -> None:
+    if not isinstance(result, tuple):
+        return
+    ok, err = result
+    if ok:
+        return
+    if err == "missing config":
+        print(
+            f"Board bridge: not configured for {event} (run 'wily board check')",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Board bridge: {event} failed: {err} (run 'wily board check')",
+            file=sys.stderr,
+        )
+
+
 def fetch_board_live_claims(phase: Phase) -> list[dict[str, Any]]:
     config = board_live_config()
     if config is None:
@@ -783,7 +801,7 @@ def close_live_sessions(
         payload = {**payload, "id": live_item_id(item), "event": event, "live_status": live_status}
         if note:
             payload["note"] = note
-        emit_board_live_event(root, payload, event, live_status, note)
+        _surface_emit_failure(event, emit_board_live_event(root, payload, event, live_status, note))
         session_id = str(payload.get("session_id", ""))
         if session_id:
             remove_live_registry(root, session_id)
@@ -1735,7 +1753,15 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
             live_payload = open_live_session(root, {**phase, "stage_id": stage.get("id", "")})
             event_payload = {**phase, **live_payload, "id": phase.get("id", phase_id), "stage_id": stage.get("id", "")}
             if board_live_enabled(root):
-                emit_board_live_event(root, event_payload, "start", "claimed")
+                _surface_emit_failure(
+                    "start",
+                    emit_board_live_event(root, event_payload, "start", "claimed"),
+                )
+            else:
+                print(
+                    "Board bridge: not configured (run 'wily board check')",
+                    file=sys.stderr,
+                )
             if heartbeat_enabled(root):
                 spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
             if retry:
@@ -1758,7 +1784,15 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
         live_payload = open_live_session(root, stage)
         event_payload = {**stage, **live_payload, "id": stage.get("id", phase_id)}
         if board_live_enabled(root):
-            emit_board_live_event(root, event_payload, "start", "claimed")
+            _surface_emit_failure(
+                "start",
+                emit_board_live_event(root, event_payload, "start", "claimed"),
+            )
+        else:
+            print(
+                "Board bridge: not configured (run 'wily board check')",
+                file=sys.stderr,
+            )
         if heartbeat_enabled(root):
             spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
         if retry:
@@ -1779,7 +1813,15 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
     live_payload = open_live_session(root, phase)
     event_payload = {**phase, **live_payload, "id": phase.get("id", phase_id)}
     if board_live_enabled(root):
-        emit_board_live_event(root, event_payload, "start", "claimed")
+        _surface_emit_failure(
+            "start",
+            emit_board_live_event(root, event_payload, "start", "claimed"),
+        )
+    else:
+        print(
+            "Board bridge: not configured (run 'wily board check')",
+            file=sys.stderr,
+        )
     if heartbeat_enabled(root):
         spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
 
@@ -2022,7 +2064,16 @@ def command_live_heartbeat(root: Path, args: list[str]) -> int:
                 session_id=session_id or None,
                 parent_shell_pid=parent_shell_pid or None,
             )
-            emit_board_live_event(root, {**phase, **payload, "id": phase.get("id", phase_id)}, "heartbeat", "active", note)
+            _surface_emit_failure(
+                "heartbeat",
+                emit_board_live_event(
+                    root,
+                    {**phase, **payload, "id": phase.get("id", phase_id)},
+                    "heartbeat",
+                    "active",
+                    note,
+                ),
+            )
             sent += 1
             if count and sent >= count:
                 break
@@ -2115,8 +2166,17 @@ def command_live_worked(root: Path, args: list[str]) -> int:
         payload["summary"] = summary
     path = live_active_dir(root) / f"{session_id}.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    emit_board_live_event(root, {**event_item, **payload, "id": phase.get("id", item_id)}, "worked", "active", summary)
-    print(f"Worked event sent for {item_id or session_id}")
+    _surface_emit_failure(
+        "worked",
+        emit_board_live_event(
+            root,
+            {**event_item, **payload, "id": phase.get("id", item_id)},
+            "worked",
+            "active",
+            summary,
+        ),
+    )
+    print(f"Worked event recorded for {item_id or session_id}")
     return 0
 
 

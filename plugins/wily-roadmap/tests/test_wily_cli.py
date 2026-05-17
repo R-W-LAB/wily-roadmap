@@ -2108,6 +2108,169 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn("Board claim warning", warning.getvalue())
             self.assertIn("Julirsia", warning.getvalue())
 
+    def test_start_warns_when_bridge_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            stderr = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch("sys.stderr", stderr):
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stderr.getvalue())
+            self.assertIn("not configured", stderr.getvalue())
+            self.assertIn("wily board check", stderr.getvalue())
+
+    def test_start_surfaces_bridge_emit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(
+                wily, "emit_board_live_event", return_value=(False, "HTTP 502")
+            ), patch("sys.stderr", stderr):
+                result = wily.command_start(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stderr.getvalue())
+            self.assertIn("HTTP 502", stderr.getvalue())
+
+    def test_complete_surfaces_bridge_emit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(
+                wily, "emit_board_live_event", return_value=(False, "HTTP 502")
+            ), patch("sys.stderr", stderr):
+                result = wily.command_complete(project, ["01"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stderr.getvalue())
+            self.assertIn("HTTP 502", stderr.getvalue())
+
+    def test_block_surfaces_bridge_emit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(
+                wily, "emit_board_live_event", return_value=(False, "HTTP 502")
+            ), patch("sys.stderr", stderr):
+                result = wily.command_block(project, ["01", "Permission missing"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stderr.getvalue())
+            self.assertIn("HTTP 502", stderr.getvalue())
+
+    def test_live_worked_surfaces_bridge_emit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(
+                wily, "emit_board_live_event", return_value=(False, "HTTP 502")
+            ), patch("sys.stderr", stderr):
+                result = wily.command_live_worked(project, ["01", "--agent", "codex"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stderr.getvalue())
+            self.assertIn("HTTP 502", stderr.getvalue())
+
+    def test_live_heartbeat_surfaces_bridge_emit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next(
+                (project / ".wily" / "local" / "live" / "active").glob("*.json")
+            )
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(
+                wily, "emit_board_live_event", return_value=(False, "HTTP 502")
+            ), patch("sys.stderr", stderr):
+                result = wily.command_live_heartbeat(
+                    project, ["01", "--session", session_id, "--count", "1"]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stderr.getvalue())
+            self.assertIn("HTTP 502", stderr.getvalue())
+
+    def test_status_warns_when_bridge_not_configured_with_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            stdout = io.StringIO()
+
+            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", stdout):
+                result = wily.command_status(project)
+
+            self.assertEqual(result, 0)
+            self.assertIn("Board bridge", stdout.getvalue())
+            self.assertIn("not connected", stdout.getvalue())
+
     def test_board_live_config_loads_repo_local_untracked_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)

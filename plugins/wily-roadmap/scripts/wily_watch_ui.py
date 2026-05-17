@@ -180,7 +180,7 @@ def _active_live_bridge_warning(view: _RoadmapView) -> Line | None:
         return None
     if not _board_live_missing_keys(view.root):
         return None
-    return [(" ! Board live not connected - run wily board check", "yellow")]
+    return [(" ! Board bridge not connected - run 'wily board check'", "yellow")]
 
 
 def _parse_live_time(value: Any) -> datetime | None:

@@ -759,7 +759,7 @@ class RenderWatchTest(unittest.TestCase):
             with patch.dict(os.environ, {}, clear=True):
                 out = wily_watch_ui.render_watch(project, interval=2.0, rich=False, size=(110, 12))
 
-            self.assertIn("Board live not connected", out)
+            self.assertIn("Board bridge not connected", out)
             self.assertIn("wily board check", out)
 
     def test_render_shows_phase_owner_and_task_metadata(self) -> None:
