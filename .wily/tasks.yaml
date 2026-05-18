@@ -20,6 +20,21 @@
       "claim_at": null,
       "done_at": "2026-05-18T13:42:41Z",
       "blocker": null
+    },
+    {
+      "id": "T02",
+      "title": "Implement next-gen watch UI with responsive layout, status grouping, actor activity panel, and checkpoint timeline",
+      "intent": "",
+      "acceptance": "",
+      "scope": [],
+      "depends_on": [],
+      "status": "done",
+      "assignee": "wily",
+      "actor": "wily",
+      "claim_sha": "fc95e4b296e998742252094ed88213eac34aaba6",
+      "claim_at": "2026-05-18T13:55:29Z",
+      "done_at": "2026-05-18T14:08:48Z",
+      "blocker": null
     }
   ]
 }
