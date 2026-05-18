@@ -1,39 +1,26 @@
 ---
 name: wily-status
-description: Use when the user types $wily-status or asks to summarize current Wily roadmap progress.
-metadata:
-  short-description: Show Wily roadmap status
+description: Use when the user types $wily-status for a one-shot Wily v3 project snapshot.
 ---
 
 # Wily Status
 
-Use `$wily-status` to show the current `.wily` roadmap pane once.
-
-This is read-only. It must not create sessions, change phase status, or revise roadmap files.
+Print one Wily v3 project snapshot, or JSON for agent/automation use.
 
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py status
+python3 <plugin-root>/scripts/wily.py status [--json]
 ```
 
-## Report
+## Behavior
 
-- roadmap version
-- progress counts
-- ASCII `Wily Roadmap` pane output
-- progress bar and done/total percentage
-- stage-based roadmap lines
-- current, ready, pending, blocked, and done phase glyphs
-- dependency hints such as `needs`
-- git footer
+- Read-only: does not mutate `.wily/`.
+- Exit codes: 0 all done, 1 active work remains, 2 blocked task exists.
 
 ## Response Style
 
-- When announcing Wily plugin or skill usage, use Korean if the user is speaking Korean.
-- Do not echo internal helper commands in normal user-facing responses.
+- Use Korean when the user is speaking Korean.
 - Report only the requested roadmap output or concise answer.
 - Avoid procedural narration before or after the result.
-- Include the `Wily Roadmap` pane output verbatim in the user response.
-- Do not replace the visual roadmap pane with a prose-only summary.
-- Do not switch to the fallback stage summary when the pane renderer is available.
+- Do not echo internal helper commands in normal user-facing responses.

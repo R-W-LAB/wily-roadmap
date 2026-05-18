@@ -1,0 +1,25 @@
+{
+  "schema": "wily-v3",
+  "project_title": "wily-roadmap v3: Project + flat goal-sized Task manager for local-first agent workflow",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Stabilize v3 in this repo",
+      "intent": "v3 redesign is applied to this repository; future work uses v3 commands only",
+      "acceptance": "wily watch shows the project; tasks.yaml/actors.yaml are present; v2 archive is preserved",
+      "scope": [
+        "plugins/wily-roadmap/scripts/wily/*",
+        "plugins/wily-roadmap/skills/*",
+        ".wily/*"
+      ],
+      "depends_on": [],
+      "status": "ready",
+      "assignee": "wily",
+      "actor": null,
+      "claim_sha": null,
+      "claim_at": null,
+      "done_at": null,
+      "blocker": null
+    }
+  ]
+}

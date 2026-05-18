@@ -1,0 +1,7 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+launcher_path=${0:A}
+marketplace_root=${launcher_path:h}
+
+exec python3 "$marketplace_root/plugins/wily-roadmap/scripts/wily.py" "$@"

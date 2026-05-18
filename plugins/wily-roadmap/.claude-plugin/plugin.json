@@ -1,7 +1,7 @@
 {
   "name": "wily",
-  "version": "0.1.0",
-  "description": "Personal agent workflow plugin for Wily roadmap, phase, and session management.",
+  "version": "3.0.0",
+  "description": "Project + flat goal-sized Task manager for Wily Roadmap v3.",
   "author": {
     "name": "Wily Castle"
   },
@@ -12,7 +12,7 @@
     "claude-code",
     "codex",
     "workflow",
-    "planning",
+    "tasks",
     "orchestration"
   ]
 }

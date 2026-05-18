@@ -1,0 +1,262 @@
+roadmap_version: 29
+roadmap_schema: "stage-v1"
+goal: "wily roadmap 플러그인을 다듬는 중이야."
+stages:
+  - id: "s01"
+    title: "Settle Korean response-style update"
+    path: "stages/s01-settle-korean-response-style-update"
+    status: "done"
+    depends_on: []
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s02"
+    title: "Harden command skill consistency"
+    path: "stages/s02-harden-command-skill-consistency"
+    status: "done"
+    depends_on: ["s01"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s03"
+    title: "Korean stage-based DAG status output"
+    path: "stages/s03-korean-stage-based-dag-status-output"
+    status: "done"
+    depends_on: ["s02"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s04"
+    title: "Stage 04: Improve init roadmap authoring / Harden lifecycle status CLI"
+    path: "stages/s04-stage-04-improve-init-roadmap-authoring-harden-l"
+    status: "done"
+    depends_on: ["s03"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s05"
+    title: "Plugin discovery and release polish"
+    path: "stages/s05-plugin-discovery-and-release-polish"
+    status: "done"
+    depends_on: ["s04"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s06"
+    title: "Stage 06: Skill 실행 시 불필요한 출력 줄이기 / Claude Code 호환성 확보"
+    path: "stages/s06-stage-06-skill-claude-code"
+    status: "done"
+    depends_on: ["s05"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s07"
+    title: "GitHub Issues 선택적 연동 계약 정의"
+    path: "stages/s07-github-issues"
+    status: "done"
+    depends_on: ["s06"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s08"
+    title: "Stage 08: Watch pane Stage별 접기 펼치기 인터랙션 / 협업용 Wily state Git 동기화 정책"
+    path: "stages/s08-stage-08-watch-pane-stage-wily-state-git"
+    status: "done"
+    depends_on: ["s06", "s07"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s09"
+    title: "Stage 09: Runner adapter 계약과 Custom Workflow manifest 정의 / Custom Workflow bundled runner 파일 구성"
+    path: "stages/s09-stage-09-runner-adapter-custom-workflow-manifest"
+    status: "done"
+    depends_on: ["s08"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s10"
+    title: "Stage 10: Zip bootstrap에서 GitHub self-update 경로 제공 / Codex app 환경의 wily-watch 전략 확정"
+    path: "stages/s10-stage-10-zip-bootstrap-github-self-update-codex"
+    status: "done"
+    depends_on: ["s09"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s11"
+    title: "Custom Workflow bundled runner 제거와 참조 전용 회귀"
+    path: "stages/s11-custom-workflow-bundled-runner"
+    status: "done"
+    depends_on: ["s10"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s12"
+    title: "Watch pane 왼쪽 버튼 토글과 펼친 상태 스크롤 보정"
+    path: "stages/s12-watch-pane"
+    status: "done"
+    depends_on: ["s10", "s11"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+
+  - id: "s13"
+    title: "roadmap YAML 블록 문법 데이터 손실 방지"
+    path: "stages/s13-roadmap-yaml"
+    status: "done"
+    depends_on: ["s12"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+
+  - id: "s14"
+    title: "Stage 14: Stage와 Phase 계층 분리 및 Stage 분해 skill 추가 / 스마트폰 Codex 앱용 하단 가로 watch pane 레이아웃"
+    path: "stages/s14-stage-14-stage-phase-stage-skill-codex-watch-pan"
+    status: "done"
+    depends_on: ["s13"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "stage/phase decomposition completed; smartphone bottom watch layout canceled"
+
+  - id: "s15"
+    title: "Wily Board external dashboard implementation"
+    path: "stages/s15-wily-board-external-dashboard"
+    status: "done"
+    depends_on: ["s14"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "prepare and implement a separate lightweight Wily Board web dashboard from docs/wily-board-plan.md"
+    current_session: "sessions/2026-05-15-150637-phase-15-2-attempt-2"
+    blocker: "Live deploy, OAuth, GitHub App credentials, preflight, and signed webhook backfill are working. Remaining smoke gap: run a real board PR-write action against an appropriate Wily state branch; mac2win and BounceBall have no .wily/roadmap.yaml on default branch."
+
+  - id: "s16"
+    title: "Wily Board live local work overlay"
+    path: "stages/s16-wily-board-live-local-work-overlay"
+    status: "done"
+    depends_on: ["s15"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "show push-before-local Wily work activity on Board as provisional live overlay while keeping committed .wily state authoritative"
+    current_session: "sessions/2026-05-16-114413-phase-16-4-attempt-1"
+
+  - id: "s17"
+    title: "Wily Board heartbeat freshness and stale presence"
+    path: "stages/s17-wily-board-heartbeat-freshness"
+    status: "done"
+    depends_on: ["s16"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "add lightweight live heartbeat so Board can show active now, last seen, and stale local sessions without LLM token usage"
+    current_session: "sessions/2026-05-16-131037-phase-17-4-attempt-1"
+
+  - id: "s18"
+    title: "Wily Board collaboration operating surface"
+    path: "stages/s18-wily-board-collaboration-ops"
+    status: "done"
+    depends_on: ["s17"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "add conflict warnings, review/awaiting-push queue, and sync health panels so Board becomes a practical collaboration control surface"
+    current_session: "sessions/2026-05-16-132817-phase-18-4-attempt-1"
+
+  - id: "s19"
+    title: "Wily Board critical path and risk view"
+    path: "stages/s19-wily-board-critical-path-risk-view"
+    status: "done"
+    depends_on: ["s18"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "surface blockers, dependency bottlenecks, stale work, awaiting-push risk, and unclaimed ready work so Board helps decide what needs attention next"
+    current_session: "sessions/2026-05-16-133600-phase-19-4-attempt-1"
+
+  - id: "s20"
+    title: "Wily Board simple personal and shared repo visibility"
+    path: "stages/s20-wily-board-simple-personal-shared-visibility"
+    status: "done"
+    depends_on: ["s16"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "separate shared collaboration repos from airmang personal repos with simple visibility fields and login-scoped filtering for two-user operation"
+    current_session: "sessions/2026-05-16-134453-phase-20-4-attempt-1"
+
+  - id: "s21"
+    title: "Wily Board UI redesign"
+    path: "stages/s21-wily-board-ui-redesign"
+    status: "done"
+    depends_on: ["s23"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "redesign Wily Board into a read-only multi-repo personal work dashboard, first linking CustomWorkflow checkpoint status boards to Wily Phase progress so Roadmap, Watch, and Board can show checkpoint activity as live runner overlay"
+    current_session: "sessions/2026-05-17-014921-phase-21-1-attempt-1"
+
+  - id: "s22"
+    title: "Wily Roadmap realtime activity heartbeat"
+    path: "stages/s22-wily-roadmap-realtime-activity-heartbeat"
+    status: "done"
+    depends_on: ["s20"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "first harden the Stage/Phase Watch contract, then show local Wily Stage and Phase activity in wily-watch and Wily Board with session-scoped heartbeat, token-zero worked events, local-only overlays, and durable sync attach"
+    current_session: "sessions/2026-05-16-164935-phase-22-7-attempt-1"
+
+  - id: "s23"
+    title: "Wily Board live draft topology overlay"
+    path: "stages/s23-wily-board-live-draft-topology-overlay"
+    status: "done"
+    depends_on: ["s22"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "show local Stage decomposition topology on Wily Board before commit and push by emitting signed draft events, rendering provisional child phases, and clearing drafts after durable GitHub sync"
+
+  - id: "s24"
+    title: "S21 realtime Board bridge end-to-end hardening"
+    path: "stages/s24-s21-realtime-board-bridge-e2e"
+    status: "done"
+    depends_on: ["s21"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "turn the S21 checkpoint/live bridge requirements into a verified end-to-end path from Wily live session, CustomWorkflow status board, and Codex hook activity through Board API/SSE/UI, with local E2E proof before approval-gated production smoke"
+    current_session: "sessions/2026-05-17-105613-phase-24-3-attempt-1"
+
+  - id: "s25"
+    title: "Wily Board UI polish and usability improvements"
+    path: "stages/s25-wily-board-ui-polish-usability"
+    status: "superseded"
+    depends_on: ["s24"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "improve the Wily Board daily-use UI after realtime bridge stabilization: scanability, navigation, responsive layout, live-update feedback, and visual QA without changing roadmap authority or adding mutation workflows"
+    superseded_by: "s27"
+    superseded_reason: "대규모 리팩토링 중심으로 로드맵을 재정렬하면서 남은 UI polish 작업을 취소함"
+
+  - id: "s26"
+    title: "Wily Roadmap plugin 개선 및 정리"
+    path: "stages/s26-wily-roadmap-plugin-improvement-cleanup"
+    status: "superseded"
+    depends_on: ["s25"]
+    execution_mode: "direct"
+    decomposition_status: "none"
+    owner: "codex"
+    task: "플러그인 cache 반영, skill/command 문서 일관성, CLI 테스트 격리, handoff/roadmap 운영 문서, release update 흐름을 정리해서 Wily Roadmap plugin을 유지보수하기 쉽게 만든다"
+    superseded_by: "s27"
+    superseded_reason: "대규모 리팩토링 Stage에 plugin 개선과 정리 범위를 흡수함"
+
+  - id: "s27"
+    title: "Wily Roadmap 대규모 리팩토링"
+    path: "stages/s27-wily-roadmap-large-refactor"
+    status: "done"
+    depends_on: ["s24"]
+    execution_mode: "direct"
+    decomposition_status: "none"
+    owner: "codex"
+    task: "Wily Roadmap plugin의 CLI, skill 계약, Board live reflection, roadmap state model, test isolation, cache/update 흐름을 한 번에 재정렬하는 대규모 리팩토링을 설계하고 실행한다"

@@ -1,0 +1,11 @@
+# Verification
+
+Passed:
+
+```bash
+python3 -m unittest tests.test_wily_cli.RunnerContractTest.test_custom_workflow_hooks_remain_opt_in_and_reference_helper_scripts tests.test_wily_cli.WilyCliTest.test_post_tool_use_capture_updates_runner_and_handoff_verification tests.test_wily_cli.WilyCliTest.test_stop_guard_reads_wily_runner_status_and_autonomy tests.test_wily_watch_ui.RenderWatchTest.test_render_shows_runner_progress_from_session_artifacts
+python3 -m unittest tests.test_wily_command_skills tests.test_wily_watch_ui tests.test_wily_cli.RunnerContractTest.test_custom_workflow_hooks_remain_opt_in_and_reference_helper_scripts tests.test_wily_cli.WilyCliTest.test_post_tool_use_capture_updates_runner_and_handoff_verification tests.test_wily_cli.WilyCliTest.test_stop_guard_reads_wily_runner_status_and_autonomy
+python3 -m unittest discover  # 133 tests passed, 2 skipped
+python3 -m py_compile scripts/wily.py scripts/wily_runner.py scripts/wily_watch_ui.py runners/custom-workflow/scripts/post_tool_use_verification_capture.py runners/custom-workflow/scripts/stop_goal_incomplete_guard.py
+git diff --check
+```

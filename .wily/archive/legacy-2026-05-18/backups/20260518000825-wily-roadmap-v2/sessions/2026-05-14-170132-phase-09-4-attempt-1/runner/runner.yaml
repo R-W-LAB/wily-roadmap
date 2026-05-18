@@ -1,0 +1,40 @@
+id: custom-workflow
+name: Custom Workflow
+version: "0.3.7"
+adapter_version: 1
+default: true
+
+entrypoints:
+  interview_skill: runners/custom-workflow/skills/deep-interview/SKILL.md
+  plan_skill: runners/custom-workflow/skills/plan-goal-runner/SKILL.md
+  parallel_skill: runners/custom-workflow/skills/parallel-lane-runner/SKILL.md
+
+capabilities:
+  - requirements_interview
+  - execution_package
+  - native_goal_command
+  - progress_log
+  - status_board
+  - verification_evidence
+  - bounded_subagents
+  - completion_review
+  - integration_review
+
+artifacts:
+  handoffs_dir: agent-handoffs
+  execution_package: agent-handoffs/{slug}-execution-package.md
+  status_board: agent-handoffs/{slug}-status.md
+  progress: agent-handoffs/{slug}-progress.md
+  verification: agent-handoffs/{slug}-verification.md
+
+autonomy_modes:
+  default: goal_scoped
+  supported:
+    - conservative
+    - goal_scoped
+    - yolo
+
+policy:
+  remote_actions_default: require_approval
+  destructive_actions_default: require_approval
+  archive_outputs_to_wily_session: true

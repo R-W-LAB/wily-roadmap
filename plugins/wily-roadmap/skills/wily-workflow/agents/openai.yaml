@@ -1,4 +1,0 @@
-interface:
-  display_name: "Wily Roadmap"
-  short_description: "Manage repo work with Wily roadmaps, phases, and sessions"
-  default_prompt: "Use $wily-workflow to inspect .wily state, choose the next phase, and execute only approved work."

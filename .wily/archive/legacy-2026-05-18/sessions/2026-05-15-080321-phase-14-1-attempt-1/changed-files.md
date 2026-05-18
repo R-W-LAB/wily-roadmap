@@ -1,0 +1,24 @@
+# Changed Files
+
+- `.wily/roadmap.yaml`
+- `.wily/status.md`
+- `.wily/revisions/2026-05-15-075757-replan-12.md`
+- `.wily/phases/14-1-stage-phase-decomposition-model/**`
+- `.wily/phases/14-2-smartphone-bottom-watch-layout/**`
+- `.wily/sessions/2026-05-15-080321-phase-14-1-attempt-1/**`
+- `docs/superpowers/plans/2026-05-15-stage-phase-hierarchy.md`
+- `plugins/wily-roadmap/.codex-plugin/plugin.json`
+- `plugins/wily-roadmap/commands/decompose-stage.md`
+- `plugins/wily-roadmap/skills/wily-decompose-stage/SKILL.md`
+- `plugins/wily-roadmap/commands/decompose-stage.md`
+- `plugins/wily-roadmap/skills/wily-init/SKILL.md`
+- `plugins/wily-roadmap/skills/wily-workflow/SKILL.md`
+- `plugins/wily-roadmap/skills/wily-workflow/references/collaboration-policy.md`
+- `plugins/wily-roadmap/skills/wily-workflow/references/planning-style.md`
+- `plugins/wily-roadmap/skills/wily-workflow/references/routing-policy.md`
+- `plugins/wily-roadmap/scripts/wily.py`
+- `plugins/wily-roadmap/scripts/wily_state_summary.py`
+- `plugins/wily-roadmap/scripts/wily_watch_ui.py`
+- `plugins/wily-roadmap/tests/test_wily_cli.py`
+- `plugins/wily-roadmap/tests/test_wily_command_skills.py`
+- `plugins/wily-roadmap/tests/test_wily_state_summary.py`

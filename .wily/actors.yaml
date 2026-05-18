@@ -1,0 +1,13 @@
+{
+  "schema": "wily-v3",
+  "actors": {
+    "wily": {
+      "display": "Wily 박사",
+      "git_author_emails": [
+        "kokyuhyun@goedu.kr",
+        "wily@example.com"
+      ],
+      "git_author_names": []
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "name": "wily-roadmap",
-  "version": "0.1.0",
-  "description": "Personal agent workflow plugin for Wily roadmap, phase, and session management.",
+  "version": "3.0.0",
+  "description": "Project + flat goal-sized Task manager for Wily Roadmap v3.",
   "author": {
     "name": "Wily Castle",
     "email": "",
@@ -13,14 +13,38 @@
   "keywords": [
     "codex",
     "workflow",
-    "planning",
+    "tasks",
     "orchestration"
   ],
-  "skills": "./skills/",
+  "commands": [
+    {"name": "init", "path": "./commands/init.md"},
+    {"name": "next", "path": "./commands/next.md"},
+    {"name": "claim", "path": "./commands/claim.md"},
+    {"name": "go", "path": "./commands/go.md"},
+    {"name": "done", "path": "./commands/done.md"},
+    {"name": "block", "path": "./commands/block.md"},
+    {"name": "replan", "path": "./commands/replan.md"},
+    {"name": "land", "path": "./commands/land.md"},
+    {"name": "watch", "path": "./commands/watch.md"},
+    {"name": "status", "path": "./commands/status.md"}
+  ],
+  "skills": [
+    {"name": "wily-init", "path": "./skills/wily-init/SKILL.md"},
+    {"name": "wily-next", "path": "./skills/wily-next/SKILL.md"},
+    {"name": "wily-claim", "path": "./skills/wily-claim/SKILL.md"},
+    {"name": "wily-go", "path": "./skills/wily-go/SKILL.md"},
+    {"name": "wily-done", "path": "./skills/wily-done/SKILL.md"},
+    {"name": "wily-block", "path": "./skills/wily-block/SKILL.md"},
+    {"name": "wily-replan", "path": "./skills/wily-replan/SKILL.md"},
+    {"name": "wily-land", "path": "./skills/wily-land/SKILL.md"},
+    {"name": "wily-watch", "path": "./skills/wily-watch/SKILL.md"},
+    {"name": "wily-status", "path": "./skills/wily-status/SKILL.md"},
+    {"name": "wily-execute", "path": "./skills/wily-execute/SKILL.md"}
+  ],
   "interface": {
     "displayName": "Wily Roadmap",
-    "shortDescription": "Manage large agentic coding projects with Wily roadmaps and phases.",
-    "longDescription": "A personal agent workflow plugin for local-first project roadmaps: initialize per-repo .wily state, split large goals into dependency-aware phases, execute phases through auditable sessions, revise future work without rewriting completed history, require approval for remote or destructive actions, document Claude Code usage, and preserve Codex plugin discovery compatibility.",
+    "shortDescription": "Manage v3 project task lists and local agent workflow state.",
+    "longDescription": "Wily Roadmap v3 manages a Project plus a flat list of goal-sized Tasks. It is local-first, approval-first for remote actions, emits custom-workflow goal text without calling external runners, and preserves Codex plugin discovery compatibility.",
     "developerName": "Wily Castle",
     "category": "Productivity",
     "capabilities": [
@@ -28,16 +52,14 @@
       "Write"
     ],
     "defaultPrompt": [
-      "$wily-init: create a Stage-first roadmap for this repo",
-      "$wily-status: show current roadmap state",
-      "$wily-watch: watch roadmap state in a tmux pane",
-      "$wily-issues: inspect optional GitHub issue linkage",
-      "$wily-next: show the next ready phase",
-      "$wily-decompose-stage <stage-id>: explicitly split a Stage into Phases and parallel lanes",
-      "$wily-run <phase-id>: route a phase through Custom Workflow Skillset",
-      "$wily-land <stage-id>/<phase-id>: commit, push, and land completed work",
-      "$wily-clean: inspect or remove safe local temporary artifacts",
-      "$wily-update: check or apply Wily plugin updates"
+      "$wily-init: start or adopt a v3 project",
+      "$wily-status: show current v3 task state",
+      "$wily-watch: watch v3 task state",
+      "$wily-next: show the next ready task",
+      "$wily-claim <id>: claim a task",
+      "$wily-go <id>: emit custom-workflow goal text",
+      "$wily-done <id>: close a verified task",
+      "$wily-replan: revise the task list"
     ],
     "brandColor": "#2563EB"
   }

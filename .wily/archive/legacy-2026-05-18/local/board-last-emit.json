@@ -1,0 +1,11 @@
+{
+  "last_failure": {
+    "at": "2026-05-17T15:11:18Z",
+    "event": "complete",
+    "reason": "network error: [Errno 8] nodename nor servname provided, or not known"
+  },
+  "last_success": {
+    "at": "2026-05-18T06:49:03Z",
+    "event": "complete"
+  }
+}

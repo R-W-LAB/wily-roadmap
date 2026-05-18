@@ -10,14 +10,24 @@ __pycache__/
 # personal execution attempts local unless a later archive policy opts in.
 .wily/*
 !.wily/project.md
+!.wily/tasks.yaml
+!.wily/actors.yaml
 !.wily/roadmap.yaml
 !.wily/status.md
 !.wily/decisions.md
+!.wily/tasks/
+!.wily/tasks/**
+!.wily/archive/
+!.wily/archive/**
 !.wily/phases/
 !.wily/phases/**
 !.wily/stages/
 !.wily/stages/**
 !.wily/revisions/
 !.wily/revisions/**
+.wily/init/
+.wily/init/**
 .wily/sessions/
 .wily/sessions/**
+.wily/local/
+.wily/local/**

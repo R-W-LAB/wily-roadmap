@@ -1,0 +1,11 @@
+# Verification
+
+Passed:
+
+```bash
+python3 -m unittest tests.test_wily_cli.WilyCliTest.test_run_dispatches_ready_phase_to_custom_workflow_without_completing_it tests.test_wily_cli.WilyCliTest.test_complete_preserves_runner_metadata_and_snapshots_latest_runner_artifacts tests.test_wily_cli.WilyCliTest.test_block_preserves_runner_metadata_and_snapshots_latest_runner_artifacts
+python3 -m unittest tests.test_wily_command_skills tests.test_wily_cli.WilyCliTest.test_run_dispatches_ready_phase_to_custom_workflow_without_completing_it tests.test_wily_cli.WilyCliTest.test_complete_preserves_runner_metadata_and_snapshots_latest_runner_artifacts tests.test_wily_cli.WilyCliTest.test_block_preserves_runner_metadata_and_snapshots_latest_runner_artifacts
+python3 -m unittest discover  # 129 tests passed, 2 skipped
+python3 -m py_compile scripts/wily.py scripts/wily_runner.py
+git diff --check
+```

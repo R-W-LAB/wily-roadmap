@@ -1,0 +1,12 @@
+# Verification
+
+Passed:
+
+```bash
+python3 -m unittest tests.test_wily_cli.WilyCliTest.test_run_dispatches_ready_phase_to_custom_workflow_without_completing_it tests.test_wily_cli.WilyCliTest.test_run_honors_runner_and_autonomy_overrides tests.test_wily_cli.WilyCliTest.test_run_prefers_phase_metadata_before_project_defaults tests.test_wily_cli.WilyCliTest.test_run_uses_project_defaults_before_runner_manifest_defaults tests.test_wily_cli.WilyCliTest.test_run_rejects_non_executable_phase tests.test_wily_cli.WilyCliTest.test_run_attaches_existing_in_progress_session
+python3 -m unittest tests.test_wily_cli.WilyCliTest.test_run_dispatches_pending_phase_when_dependencies_are_done tests.test_wily_cli.WilyCliTest.test_run_rejects_non_executable_phase
+python3 -m unittest tests.test_wily_cli
+python3 -m unittest tests.test_wily_cli tests.test_wily_command_skills tests.test_wily_watch_ui
+python3 -m unittest discover  # 127 tests passed, 2 skipped
+python3 -m py_compile scripts/wily.py scripts/wily_runner.py
+```
