@@ -22,6 +22,8 @@ from wily.observation import observation_base  # noqa: E402
 from wily.paths import WilyPaths, WilyRootNotFound, find_wily_root  # noqa: E402
 from wily.progress import CpEvent, CpSummary, append_event, cp_summary, init_progress  # noqa: E402
 from wily.transitions import DependencyError, TransitionError, apply_claim, apply_done, check_dependencies  # noqa: E402
+from wily.ui.watch_layout import WatchLayoutConfig  # noqa: E402
+from wily.ui.watch_activity import build_activity_lines  # noqa: E402
 from wily.ui.watch_render import render_watch  # noqa: E402
 
 
@@ -32,6 +34,20 @@ def _git_repo(path: Path) -> None:
     (path / "README.md").write_text("# demo\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=path, check=True)
+
+
+class chdir_compat:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.old: str | None = None
+
+    def __enter__(self) -> None:
+        self.old = os.getcwd()
+        os.chdir(self.path)
+
+    def __exit__(self, *_exc) -> None:
+        if self.old is not None:
+            os.chdir(self.old)
 
 
 class CoreModelTest(unittest.TestCase):
@@ -51,6 +67,7 @@ class CoreModelTest(unittest.TestCase):
             append_event(paths, "T01", CpEvent(ts="2026-05-18T00:01:00Z", actor="wily", cp="plan", event="done"))
             summary = cp_summary(paths, "T01")
             self.assertEqual((summary.total, summary.done), (1, 1))
+            self.assertEqual(summary.cp_names, ["plan"])
 
     def test_transitions_and_dependency_errors(self) -> None:
         task = Task(id="T01", title="x")
@@ -89,9 +106,12 @@ class CoreModelTest(unittest.TestCase):
         self.assertIn("Wily Roadmap v3", output)
         self.assertIn("▕", output)
         self.assertIn("▏", output)
-        self.assertIn("├─", output)
-        self.assertIn("└─", output)
+        self.assertIn("── IN PROGRESS ──", output)
+        self.assertIn("── READY ──", output)
+        self.assertIn("── DONE ──", output)
+        self.assertIn("◐", output)
         self.assertIn("▶", output)
+        self.assertIn("●", output)
 
     def test_watch_renderer_shows_task_detail_rows_in_ascii(self) -> None:
         output = render_watch(
@@ -107,7 +127,7 @@ class CoreModelTest(unittest.TestCase):
             ],
             actors=[],
             observed_commits=[],
-            cp_summaries={"T01": CpSummary(total=3, done=1, in_progress=1, current_cp="verify")},
+            cp_summaries={"T01": CpSummary(total=3, done=1, in_progress=1, current_cp="verify", cp_names=["plan", "design", "verify"])},
             mode="solo",
             ui="ascii",
         )
@@ -115,6 +135,98 @@ class CoreModelTest(unittest.TestCase):
         self.assertIn("\\- ~ T01", output)
         self.assertIn("cp [#--] 1/3 cp current:verify", output)
         self.assertIn("blocker: waiting for review", output)
+
+    def test_watch_renderer_groups_tasks_by_status(self) -> None:
+        output = render_watch(
+            project_title="Demo",
+            tasks=[
+                Task(id="T01", title="Done Task", status=TaskStatus.DONE, assignee="wily"),
+                Task(id="T02", title="Ready Task", status=TaskStatus.READY, assignee="right"),
+                Task(id="T03", title="Blocked Task", status=TaskStatus.BLOCKED, assignee="wily", blocker="api down"),
+            ],
+            actors=[],
+            observed_commits=[],
+            cp_summaries={},
+            mode="solo",
+            ui="ascii",
+        )
+        self.assertIn("-- BLOCKED --", output)
+        self.assertIn("-- READY --", output)
+        self.assertIn("-- DONE --", output)
+        blocked_pos = output.index("-- BLOCKED --")
+        ready_pos = output.index("-- READY --")
+        done_pos = output.index("-- DONE --")
+        self.assertLess(blocked_pos, ready_pos)
+        self.assertLess(ready_pos, done_pos)
+
+    def test_watch_renderer_shows_dependency_text(self) -> None:
+        output = render_watch(
+            project_title="Demo",
+            tasks=[
+                Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, assignee="wily"),
+                Task(id="T02", title="Second", status=TaskStatus.READY, assignee="wily", depends_on=["T01"]),
+            ],
+            actors=[],
+            observed_commits=[],
+            cp_summaries={},
+            mode="solo",
+            ui="ascii",
+        )
+        self.assertIn("waiting for: T01 (in_progress)", output)
+
+    def test_watch_layout_config_responsive_breakpoints(self) -> None:
+        compact = WatchLayoutConfig(width=72, ascii_mode=True, compact=True)
+        self.assertEqual(compact.layout_mode, "compact")
+        self.assertEqual(compact.task_pane_width, 70)
+        self.assertFalse(compact.show_activity_panel)
+
+        standard = WatchLayoutConfig(width=100)
+        self.assertEqual(standard.layout_mode, "standard")
+        self.assertFalse(standard.show_activity_panel)
+
+        wide = WatchLayoutConfig(width=130)
+        self.assertEqual(wide.layout_mode, "wide")
+        self.assertTrue(wide.show_activity_panel)
+        self.assertEqual(wide.task_pane_width, 65)
+
+    def test_watch_activity_panel_renders_actor_state(self) -> None:
+        lines = build_activity_lines(
+            actors=[Actor(id="wily", display="Wily", git_author_emails=["wily@example.com"])],
+            tasks=[
+                Task(id="T01", title="First", status=TaskStatus.DONE, actor="wily", done_at="2026-05-18T10:00:00Z"),
+                Task(id="T02", title="Second", status=TaskStatus.IN_PROGRESS, actor="wily", assignee="wily"),
+            ],
+            cp_summaries={"T02": CpSummary(total=1, done=0, in_progress=1, current_cp="verify", cp_names=["verify"])},
+            ascii_mode=True,
+            width=30,
+        )
+        text = "\n".join(t for t, _s in lines)
+        self.assertIn("ACTIVITY", text)
+        self.assertIn("wily", text)
+        self.assertIn("current: T02 verify", text)
+        self.assertIn("last done: T01", text)
+
+    def test_watch_status_args_strip_new_flags(self) -> None:
+        stripped = watch_cmd.status_args_from_watch_args(
+            ["--here", "--interval", "1", "--ui", "ascii", "--dry-run-pane", "--no-interactive", "--compact", "--show-timeline", "--hide-log"]
+        )
+        self.assertEqual(stripped, ["--ui", "ascii"])
+
+    def test_tmux_watch_command_passes_new_flags(self) -> None:
+        root = Path("/tmp/demo repo")
+        command = watch_cmd.tmux_watch_command(
+            root,
+            ["--interval", "1.5", "--ui", "ascii", "--compact", "--show-timeline", "--hide-log"],
+            script=Path("/tmp/wily.py"),
+            python="python3",
+            current_pane="%7",
+        )
+        self.assertEqual(command[:4], ["tmux", "split-window", "-t", "%7"])
+        self.assertEqual(command[4], "-h")
+        inner = command[5]
+        self.assertIn("--compact", inner)
+        self.assertIn("--show-timeline", inner)
+        self.assertIn("--hide-log", inner)
 
     def test_watch_launch_mode_selects_tmux_pane_by_default(self) -> None:
         self.assertEqual(
@@ -153,14 +265,6 @@ class CoreModelTest(unittest.TestCase):
         inner = command[5]
         self.assertIn("cd '/tmp/demo repo'", inner)
         self.assertIn("python3 /tmp/wily.py watch --here --ui ascii --interval 1.5", inner)
-
-    def test_watch_status_args_strip_watch_only_flags(self) -> None:
-        self.assertEqual(
-            watch_cmd.status_args_from_watch_args(
-                ["--here", "--interval", "1", "--ui", "ascii", "--dry-run-pane", "--no-interactive"]
-            ),
-            ["--ui", "ascii"],
-        )
 
     def test_watch_rejects_invalid_ui_before_launching_pane(self) -> None:
         stderr = StringIO()
@@ -269,17 +373,3 @@ class CliLifecycleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class chdir_compat:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.old: str | None = None
-
-    def __enter__(self) -> None:
-        self.old = os.getcwd()
-        os.chdir(self.path)
-
-    def __exit__(self, *_exc) -> None:
-        if self.old is not None:
-            os.chdir(self.old)
