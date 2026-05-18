@@ -17,6 +17,9 @@ def main(args: list[str]) -> int:
     ui = watch_ui(args)
     if ui is None:
         return _common.EXIT_USAGE
+    compact = "--compact" in args
+    show_timeline = "--show-timeline" in args
+    show_log = "--hide-log" not in args
     if "--dry-run-pane" in args:
         interval = _interval(args)
         if interval is None:
@@ -76,7 +79,7 @@ def status_args_from_watch_args(args: list[str]) -> list[str]:
         if skip_next:
             skip_next = False
             continue
-        if arg in {"--once", "--here", "--dry-run-pane", "--no-interactive"}:
+        if arg in {"--once", "--here", "--dry-run-pane", "--no-interactive", "--compact", "--show-timeline", "--hide-log"}:
             continue
         if arg == "--interval":
             skip_next = True
@@ -128,21 +131,23 @@ def tmux_watch_command(
     interval = _interval(args)
     if interval is None:
         interval = 2.0
-    inner = " ".join(
-        [
-            "cd",
-            shlex.quote(str(root)),
-            "&&",
-            shlex.quote(python),
-            shlex.quote(str(script)),
-            "watch",
-            "--here",
-            "--ui",
-            shlex.quote(watch_ui(args) or "auto"),
-            "--interval",
-            shlex.quote(f"{interval:.1f}"),
-        ]
-    )
+    inner_parts = [
+        "cd",
+        shlex.quote(str(root)),
+        "&&",
+        shlex.quote(python),
+        shlex.quote(str(script)),
+        "watch",
+        "--here",
+        "--ui",
+        shlex.quote(watch_ui(args) or "auto"),
+        "--interval",
+        shlex.quote(f"{interval:.1f}"),
+    ]
+    for flag in ("--compact", "--show-timeline", "--hide-log"):
+        if flag in args:
+            inner_parts.append(flag)
+    inner = " ".join(inner_parts)
     command = ["tmux", "split-window"]
     pane = current_pane if current_pane is not None else os.environ.get("TMUX_PANE", "").strip()
     if pane:

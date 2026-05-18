@@ -44,6 +44,9 @@ def main(args: list[str]) -> int:
             }
         )
     else:
+        compact = "--compact" in args
+        show_timeline = "--show-timeline" in args
+        show_log = "--hide-log" not in args
         _common.emit_text(
             render_watch(
                 project_title=project_title,
@@ -53,6 +56,9 @@ def main(args: list[str]) -> int:
                 cp_summaries=summaries,
                 mode=mode,
                 ui=ui,
+                compact=compact,
+                show_timeline=show_timeline,
+                show_log=show_log,
             )
         )
     if any(task.status == TaskStatus.BLOCKED for task in tasks):
