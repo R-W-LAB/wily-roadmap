@@ -20,6 +20,7 @@ COMMANDS = {
     "wily-retry": "scripts/wily.py retry",
     "wily-replan": "scripts/wily.py replan",
     "wily-run": "scripts/wily.py run",
+    "wily-land": "scripts/wily.py land",
     "wily-decompose-stage": "scripts/wily.py decompose-stage",
     "wily-update": "scripts/wily.py update",
 }
@@ -32,6 +33,7 @@ MUTATING_COMMANDS = {
     "wily-retry",
     "wily-replan",
     "wily-run",
+    "wily-land",
     "wily-decompose-stage",
     "wily-update",
 }
@@ -78,7 +80,7 @@ class WilyCommandSkillsTest(unittest.TestCase):
                 self.assertIn(QUIET_RESPONSE_PHRASE, text)
 
     def test_command_skills_define_boundaries(self) -> None:
-        mutating = {"wily-init", "wily-start", "wily-complete", "wily-block", "wily-retry", "wily-replan"}
+        mutating = {"wily-init", "wily-start", "wily-complete", "wily-block", "wily-retry", "wily-replan", "wily-land"}
         readonly = {"wily-status", "wily-watch", "wily-next"}
         for command in mutating:
             with self.subTest(command=command):
@@ -176,7 +178,7 @@ class WilyCommandSkillsTest(unittest.TestCase):
         skill = (ROOT / "skills" / "wily-run" / "SKILL.md").read_text(encoding="utf-8")
         command = (ROOT / "commands" / "run.md").read_text(encoding="utf-8")
 
-        self.assertIn("$wily-run <phase-id> [--runner custom-workflow]", skill)
+        self.assertIn("$wily-run <stage-id>/<phase-id> [--runner custom-workflow]", skill)
         self.assertIn("custom-workflow-skillset:plan-goal-runner", skill)
         self.assertIn("custom-workflow-skillset:parallel-lane-runner", skill)
         self.assertIn("custom-workflow-result.md", skill)
@@ -187,6 +189,41 @@ class WilyCommandSkillsTest(unittest.TestCase):
         self.assertIn("Run the `wily-run` skill", command)
         self.assertIn("Custom Workflow Skillset", command)
         self.assertIn("custom-workflow-skillset:plan-goal-runner", command)
+
+    def test_lifecycle_skills_use_v2_canonical_phase_refs_as_primary(self) -> None:
+        expected = {
+            "wily-start": "$wily-start <stage-id>/<phase-id>",
+            "wily-complete": "$wily-complete <stage-id>/<phase-id>",
+            "wily-block": "$wily-block <stage-id>/<phase-id>",
+            "wily-retry": "$wily-retry <stage-id>/<phase-id>",
+            "wily-run": "$wily-run <stage-id>/<phase-id>",
+            "wily-land": "$wily-land <stage-id>/<phase-id>",
+        }
+        for command, usage in expected.items():
+            with self.subTest(command=command):
+                text = self.skill_text(command)
+                self.assertIn(usage, text)
+                self.assertNotIn(f"${command} <phase-id>", text)
+                self.assertNotIn("Use `$" + command + " <phase-id>", text)
+
+    def test_retry_command_doc_uses_canonical_phase_ref(self) -> None:
+        command = (ROOT / "commands" / "retry.md").read_text(encoding="utf-8")
+
+        self.assertIn("argument-hint: '<stage-id>/<phase-id>'", command)
+        self.assertIn("scripts/wily.py retry <stage-id>/<phase-id>", command)
+        self.assertNotIn("argument-hint: '<phase-id>'", command)
+        self.assertNotIn("scripts/wily.py retry <phase-id>", command)
+
+    def test_land_command_documents_explicit_remote_boundary(self) -> None:
+        skill = self.skill_text("wily-land")
+        command = (ROOT / "commands" / "land.md").read_text(encoding="utf-8")
+
+        self.assertIn("scripts/wily.py land <stage-id>/<phase-id>", skill)
+        self.assertIn("commit, push, and land", skill)
+        self.assertIn("Remote actions are explicit", skill)
+        self.assertIn("Run the `wily-land` skill", command)
+        self.assertIn("--direct", command)
+        self.assertIn("--pr", command)
 
     def test_readme_documents_repo_local_zsh_launcher(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

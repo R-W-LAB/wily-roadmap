@@ -3,19 +3,19 @@
 ## Execution Loop
 
 1. Read `.wily/roadmap.yaml`.
-2. Select a `ready` phase or the phase explicitly named by the user.
+2. Select a `ready` Phase or the Phase explicitly named by the user. In v2, use `<stage-id>/<phase-id>`; Stage ids are not executable.
 3. Show the phase purpose, dependencies, likely touched files, planner adapter, prompt, handoff, and verification.
 4. Ask for approval before implementation.
 5. Create a new session under `.wily/sessions/`.
-   - Helper command: `python3 <plugin-root>/scripts/wily.py start <phase-id>`
+   - Helper command: `python3 <plugin-root>/scripts/wily.py start <stage-id>/<phase-id>`
 6. Mark the phase `in_progress`.
 7. If no detailed implementation plan exists and one is needed for implementation, use the recommended external planner before changing project files.
 8. Implement only the approved phase.
 9. Run focused phase verification.
 10. Record result, changed files, verification output, planner used, and blockers in the session.
 11. Mark the phase `needs_review`, `blocked`, or `done` based on the result and user approval.
-    - Helper command for verified completion: `python3 <plugin-root>/scripts/wily.py complete <phase-id>`
-    - Helper command for blockers: `python3 <plugin-root>/scripts/wily.py block <phase-id> "<reason>"`
+    - Helper command for verified completion: `python3 <plugin-root>/scripts/wily.py complete <stage-id>/<phase-id>`
+    - Helper command for blockers: `python3 <plugin-root>/scripts/wily.py block <stage-id>/<phase-id> "<reason>"`
 
 ## Session Status
 
@@ -56,7 +56,7 @@ If a phase fails or is interrupted, keep the existing session and create a new a
 Helper command:
 
 ```bash
-python3 <plugin-root>/scripts/wily.py retry <phase-id>
+python3 <plugin-root>/scripts/wily.py retry <stage-id>/<phase-id>
 ```
 
 The phase remains `blocked`, `needs_review`, or `ready` depending on the next safe action.

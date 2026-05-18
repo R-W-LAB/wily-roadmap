@@ -1,6 +1,5 @@
 stage_id: "s18"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "18-1"
     title: "Claim conflict warnings"

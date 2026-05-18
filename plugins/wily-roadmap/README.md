@@ -35,12 +35,35 @@ From the plugin root, run Wily with the checked-in zsh launcher:
 ```bash
 ./wily status
 ./wily next
+./wily migrate-state --to wily-roadmap-v2 --dry-run
+./wily run <stage-id>/<phase-id> --dry-run
 ./wily watch
 ./wily watch --once --ui ascii
 ./wily update --check
 ```
 
 `./wily watch` is the live roadmap dashboard. Inside tmux it opens a right-side split pane and targets the current `TMUX_PANE` when tmux exposes it. Outside tmux, including when working beside Codex app, run it in a side terminal and it will use that terminal directly.
+
+## Stage/Phase v2
+
+`wily-roadmap-v2` is the durable roadmap model. `.wily/roadmap.yaml` stores Stage rows, and `.wily/stages/<stage-id>-<slug>/stage.yaml` stores child Phases. Stage is the collaboration and aggregation boundary; Phase is the execution unit.
+
+Use canonical Phase refs for v2 execution:
+
+```bash
+./wily start <stage-id>/<phase-id>
+./wily run <stage-id>/<phase-id> --dry-run
+./wily checkpoint-sync <stage-id>/<phase-id> --status-board agent-handoffs/example-status.md
+./wily complete <stage-id>/<phase-id>
+```
+
+Stage ids are not executable. If a repository still has legacy top-level `phases:`, inspect the migration first:
+
+```bash
+./wily migrate-state --to wily-roadmap-v2 --dry-run
+```
+
+`--apply` writes a backup and migration report. Legacy cleanup requires the explicit `--prune-legacy` mode.
 
 For the styled Rich dashboard, install the optional watch UI dependency once:
 

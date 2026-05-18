@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -265,6 +266,157 @@ class WilyStateSummaryTest(unittest.TestCase):
         self.assertIn("  - s02-right-terrain @right", output)
         self.assertIn("write_scope 겹침 없음", output)
 
+    def test_v2_summary_reports_next_executable_phase_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily" / "stages" / "s01-foundation").mkdir(parents=True)
+            (project / ".wily" / "stages" / "s02-refactor").mkdir(parents=True)
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_schema: "wily-roadmap-v2"',
+                        'goal: "Ship v2 roadmap"',
+                        'stages:',
+                        '  - id: "s01"',
+                        '    title: "Foundation"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '    path: "stages/s01-foundation"',
+                        '  - id: "s02"',
+                        '    title: "Refactor"',
+                        '    status: "pending"',
+                        '    depends_on: ["s01"]',
+                        '    path: "stages/s02-refactor"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (project / ".wily" / "stages" / "s01-foundation" / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s01"',
+                        'schema: "wily-roadmap-v2"',
+                        'phases:',
+                        '  - id: "p01"',
+                        '    title: "Foundation"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (project / ".wily" / "stages" / "s02-refactor" / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s02"',
+                        'schema: "wily-roadmap-v2"',
+                        'phases:',
+                        '  - id: "p01"',
+                        '    title: "Refactor"',
+                        '    status: "pending"',
+                        '    depends_on: ["s01/p01"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            output = self.run_summary(project)
+
+        self.assertIn("로드맵 스키마: wily-roadmap-v2", output)
+        self.assertIn("다음 Stage: s02 - Refactor", output)
+        self.assertIn("다음 Phase: s02/p01 - Refactor", output)
+        self.assertIn("  [s02 준비됨] Refactor", output)
+        self.assertIn("    - [s02/p01 실행 가능] Refactor", output)
+
+    def test_v2_stage_status_is_aggregated_from_child_phases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily" / "stages" / "s01-foundation").mkdir(parents=True)
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_schema: "wily-roadmap-v2"',
+                        'stages:',
+                        '  - id: "s01"',
+                        '    title: "Foundation"',
+                        '    status: "pending"',
+                        '    depends_on: []',
+                        '    path: "stages/s01-foundation"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (project / ".wily" / "stages" / "s01-foundation" / "stage.yaml").write_text(
+                "\n".join(
+                    [
+                        'stage_id: "s01"',
+                        'schema: "wily-roadmap-v2"',
+                        'phases:',
+                        '  - id: "p01"',
+                        '    title: "Implementation"',
+                        '    status: "in_progress"',
+                        '    depends_on: []',
+                        '  - id: "p02"',
+                        '    title: "Review"',
+                        '    status: "pending"',
+                        '    depends_on: ["s01/p01"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            output = self.run_summary(project)
+
+        self.assertIn("  [s01 진행 중] Foundation", output)
+        self.assertIn("진행: 완료 0, 실행 가능 0, 진행 중 1, 차단 0, 대체됨 0", output)
+
+    def test_projection_builder_attaches_checkpoint_overlay_to_v2_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            subprocess.run(
+                [
+                    "cp",
+                    "-R",
+                    str(ROOT / "tests" / "fixtures" / "migration" / "already-v2"),
+                    str(project),
+                ],
+                check=True,
+            )
+            active_dir = project / ".wily" / "local" / "live" / "active"
+            active_dir.mkdir(parents=True)
+            (active_dir / "checkpoint.json").write_text(
+                json.dumps(
+                    {
+                        "item_type": "phase",
+                        "stage_id": "s02",
+                        "phase_id": "p01",
+                        "event": "checkpoint_updated",
+                        "checkpoint": {
+                            "source": "custom-workflow",
+                            "status_board": "agent-handoffs/s02-p01-status.md",
+                            "state": "RUNNING",
+                            "progress": {"done": 1, "total": 3, "percent": 33},
+                            "current": {"id": "CP01", "title": "Parser", "status": "RUNNING"},
+                            "rows": [
+                                {"id": "CP01", "title": "Parser", "status": "RUNNING", "owner": "root"}
+                            ],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            import wily_projection
+
+            projection = wily_projection.build_projection(project)
+
+        self.assertEqual(projection["schema"], "wily-roadmap-projection-v1")
+        self.assertEqual(projection["stages"][1]["stage_id"], "s02")
+        self.assertEqual(projection["stages"][1]["phases"][0]["phase_id"], "p01")
+        overlay = projection["stages"][1]["phases"][0]["checkpoint_overlay"]
+        self.assertEqual(overlay["source"], "custom-workflow")
+        self.assertFalse(overlay["is_durable"])
+        self.assertEqual(overlay["current"]["id"], "CP01")
+
     def test_groups_parallel_phases_by_dependency_stage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -410,6 +562,83 @@ class WilyStateSummaryTest(unittest.TestCase):
         self.assertIn("  - 04R 대체: 04", output)
         self.assertIn("대체된 단계:", output)
         self.assertIn("  - 04 Old integration plan", output)
+
+    def test_v2_stage_summary_counts_superseded_stages_as_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily").mkdir()
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 30',
+                        'roadmap_schema: "wily-roadmap-v2"',
+                        'stages:',
+                        '  - id: "s01"',
+                        '    title: "Foundation"',
+                        '    status: "done"',
+                        '    depends_on: []',
+                        '    phases:',
+                        '      - id: "p01"',
+                        '        title: "Foundation phase"',
+                        '        status: "done"',
+                        '  - id: "s02"',
+                        '    title: "Superseded plan"',
+                        '    status: "superseded"',
+                        '    depends_on: ["s01"]',
+                        '    superseded_by: "s03"',
+                        '  - id: "s03"',
+                        '    title: "Replacement"',
+                        '    status: "done"',
+                        '    depends_on: ["s01"]',
+                        '    phases:',
+                        '      - id: "p01"',
+                        '        title: "Replacement phase"',
+                        '        status: "done"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            output = self.run_summary(project)
+
+        self.assertIn("진행: 완료 2, 실행 가능 0, 진행 중 0, 차단 0, 대체됨 1, 닫힘 3/3", output)
+        self.assertIn("다음 Stage: 없음", output)
+        self.assertIn("다음 Phase: 없음", output)
+
+    def test_v2_stage_dependencies_treat_superseded_stages_as_non_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily").mkdir()
+            (project / ".wily" / "roadmap.yaml").write_text(
+                "\n".join(
+                    [
+                        'roadmap_version: 30',
+                        'roadmap_schema: "wily-roadmap-v2"',
+                        'stages:',
+                        '  - id: "s01"',
+                        '    title: "Old path"',
+                        '    status: "superseded"',
+                        '    depends_on: []',
+                        '    superseded_by: "s02"',
+                        '  - id: "s02"',
+                        '    title: "Replacement work"',
+                        '    status: "pending"',
+                        '    depends_on: ["s01"]',
+                        '    phases:',
+                        '      - id: "p01"',
+                        '        title: "Build replacement"',
+                        '        status: "pending"',
+                        '        depends_on: []',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            output = self.run_summary(project)
+
+        self.assertIn("진행: 완료 0, 실행 가능 1, 진행 중 0, 차단 0, 대체됨 1, 닫힘 1/2", output)
+        self.assertIn("다음 Stage: s02 - Replacement work", output)
+        self.assertIn("다음 Phase: s02/p01 - Build replacement", output)
 
     def test_parse_roadmap_preserves_folded_block_scalar(self) -> None:
         roadmap = wily_state_summary.parse_roadmap(

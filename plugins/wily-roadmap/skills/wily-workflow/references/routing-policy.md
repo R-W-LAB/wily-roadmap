@@ -12,8 +12,8 @@ Use these labels in summaries when helpful:
 - `init_roadmap`: create or refresh `.wily/` from the current repository baseline and user goal.
 - `show_status`: summarize `.wily/roadmap.yaml`, ready Stages or legacy phases, blockers, and progress.
 - `select_phase`: recommend one or more ready Stages or phases.
-- `execute_phase`: run an approved Stage or phase through a new session.
-- `complete_phase`: mark a reviewed Stage or phase done after verification evidence is recorded.
+- `execute_phase`: run an approved Phase through a new session.
+- `complete_phase`: mark a reviewed Phase done after verification evidence is recorded.
 - `block_phase`: record a blocker and stop execution.
 - `retry_phase`: create another session for an unfinished Stage or phase.
 - `replan_roadmap`: preserve completed history and revise future work.
@@ -23,8 +23,8 @@ Use these labels in summaries when helpful:
 
 - If the user says `wily init`, inspect the repository before writing `.wily/`.
 - If the user provides a final goal with init, use it. If not, summarize current state and ask for the goal.
-- If `.wily/` exists and the user asks what to do next, read `roadmap.yaml` and recommend ready Stages or legacy phases.
-- If the user asks to implement, map the request to a Stage or Phase. If no roadmap unit exists, ask whether to create roadmap state or handle the task directly.
+- If `.wily/` exists and the user asks what to do next, read `roadmap.yaml` and recommend the next ready Stage plus the next executable Phase.
+- If the user asks to implement, map the request to a Phase. If they name a Stage, suggest its next ready Phase, `$wily-decompose-stage`, or `wily migrate-state --to wily-roadmap-v2 --dry-run`.
 - If multiple ready Stages can run independently, present them as parallel candidates and include `owner` plus `write_scope` when available.
 - If the user changes the target after progress exists, use `replan_roadmap`, not a fresh phase-1 reset.
 - If remote or destructive work is implied, stop and ask for explicit approval.
@@ -58,12 +58,13 @@ Use `scripts/wily.py` for deterministic state operations:
 python3 <plugin-root>/scripts/wily.py init "Goal text"
 python3 <plugin-root>/scripts/wily.py status
 python3 <plugin-root>/scripts/wily.py next
-python3 <plugin-root>/scripts/wily.py start 04-1
+python3 <plugin-root>/scripts/wily.py start s04/p01
 python3 <plugin-root>/scripts/wily.py decompose-stage s01-core --from-json stage-plan.json
-python3 <plugin-root>/scripts/wily.py complete 04-1
-python3 <plugin-root>/scripts/wily.py block 04-1 "Reason"
-python3 <plugin-root>/scripts/wily.py retry 04-1
+python3 <plugin-root>/scripts/wily.py complete s04/p01
+python3 <plugin-root>/scripts/wily.py block s04/p01 "Reason"
+python3 <plugin-root>/scripts/wily.py retry s04/p01
 python3 <plugin-root>/scripts/wily.py replan "Reason"
+python3 <plugin-root>/scripts/wily.py migrate-state --to wily-roadmap-v2 --dry-run
 python3 <plugin-root>/scripts/wily.py watch
 python3 <plugin-root>/scripts/wily.py board check --probe
 python3 <plugin-root>/scripts/wily.py board sync-local <stage-id>

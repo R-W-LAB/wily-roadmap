@@ -1,6 +1,5 @@
 stage_id: "s12"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "12-1"
     title: "Watch pane 왼쪽 버튼 토글과 펼친 상태 스크롤 보정"

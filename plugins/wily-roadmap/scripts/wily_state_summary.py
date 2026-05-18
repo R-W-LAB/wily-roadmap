@@ -21,6 +21,7 @@ STATUS_LABELS = {
     "blocked": "차단",
     "superseded": "대체됨",
 }
+CLOSED_STATUSES = {"done", "superseded"}
 
 
 def repo_root(start: Path) -> Path:
@@ -467,6 +468,10 @@ def dependencies_done_in_units(unit: dict[str, Any], units: list[dict[str, Any]]
     return True
 
 
+def is_closed_status(status: Any) -> bool:
+    return str(status) in CLOSED_STATUSES
+
+
 def is_executable_unit(unit: dict[str, Any], units: list[dict[str, Any]]) -> bool:
     status = unit.get("status")
     if status == "ready":
@@ -476,6 +481,15 @@ def is_executable_unit(unit: dict[str, Any], units: list[dict[str, Any]]) -> boo
 
 def executable_stages(stages: list[Stage]) -> list[Stage]:
     return [stage for stage in stages if is_executable_unit(stage, stages)]
+
+
+def roadmap_schema(roadmap: dict[str, Any]) -> str | None:
+    schema = roadmap.get("roadmap_schema")
+    return str(schema) if schema else None
+
+
+def is_v2_roadmap(roadmap: dict[str, Any]) -> bool:
+    return roadmap_schema(roadmap) == "wily-roadmap-v2"
 
 
 def roadmap_stages(roadmap: dict[str, Any]) -> list[Stage]:
@@ -522,6 +536,113 @@ def enrich_stages_with_local_state(root: Path, stages: list[Stage]) -> list[Stag
             copy["phases"] = local_phases
         enriched.append(copy)
     return enriched
+
+
+def canonical_phase_ref(stage: Stage, phase: Phase) -> str:
+    stage_id = str(stage.get("id") or stage.get("stage_id") or "unknown")
+    phase_id = str(phase.get("id") or "unknown")
+    if "/" in phase_id:
+        return phase_id
+    return f"{stage_id}/{phase_id}"
+
+
+def normalize_phase_dependency(stage: Stage, dependency: Any) -> str:
+    value = str(dependency)
+    if "/" in value:
+        return value
+    stage_id = str(stage.get("id") or stage.get("stage_id") or "unknown")
+    return f"{stage_id}/{value}"
+
+
+def stage_child_phases(stage: Stage) -> list[Phase]:
+    phases = stage.get("phases") or []
+    return [phase for phase in phases if isinstance(phase, dict)]
+
+
+def all_child_phase_index(stages: list[Stage]) -> dict[str, Phase]:
+    by_ref: dict[str, Phase] = {}
+    for stage in stages:
+        for phase in stage_child_phases(stage):
+            by_ref[canonical_phase_ref(stage, phase)] = phase
+    return by_ref
+
+
+def child_phase_dependencies_done(stage: Stage, phase: Phase, stages: list[Stage]) -> bool:
+    by_ref = all_child_phase_index(stages)
+    for dependency in phase.get("depends_on") or []:
+        dependency_phase = by_ref.get(normalize_phase_dependency(stage, dependency))
+        if not dependency_phase or dependency_phase.get("status") != "done":
+            return False
+    return True
+
+
+def is_executable_child_phase(stage: Stage, phase: Phase, stages: list[Stage]) -> bool:
+    status = phase.get("status")
+    if status == "ready":
+        return True
+    return status == "pending" and child_phase_dependencies_done(stage, phase, stages)
+
+
+def executable_child_phases(stage: Stage, stages: list[Stage]) -> list[Phase]:
+    return [phase for phase in stage_child_phases(stage) if is_executable_child_phase(stage, phase, stages)]
+
+
+def v2_stage_dependencies_done(stage: Stage, stages: list[Stage], visiting: set[str] | None = None) -> bool:
+    by_id = stage_index(stages)
+    visiting = visiting or set()
+    for dependency in stage.get("depends_on") or []:
+        dependency_stage = by_id.get(str(dependency))
+        if not dependency_stage:
+            return False
+        dependency_id = str(dependency_stage.get("id"))
+        if dependency_id in visiting:
+            return False
+        if not is_closed_status(aggregate_stage_status(dependency_stage, stages, visiting | {dependency_id})):
+            return False
+    return True
+
+
+def aggregate_stage_status(stage: Stage, stages: list[Stage], visiting: set[str] | None = None) -> str:
+    if stage.get("status") == "superseded":
+        return "superseded"
+
+    child_phases = [phase for phase in stage_child_phases(stage) if phase.get("status") != "superseded"]
+    if not child_phases:
+        return "pending"
+
+    statuses = [str(phase.get("status", "pending")) for phase in child_phases]
+    if all(status == "done" for status in statuses):
+        return "done"
+    if "in_progress" in statuses:
+        return "in_progress"
+    if "blocked" in statuses:
+        return "blocked"
+    if "needs_review" in statuses:
+        return "needs_review"
+    if v2_stage_dependencies_done(stage, stages, visiting) and executable_child_phases(stage, stages):
+        return "ready"
+    return "pending"
+
+
+def normalize_v2_stage_statuses(stages: list[Stage]) -> list[Stage]:
+    normalized: list[Stage] = []
+    for stage in stages:
+        copy = dict(stage)
+        copy["status"] = aggregate_stage_status(copy, stages)
+        normalized.append(copy)
+    return normalized
+
+
+def executable_v2_stages(stages: list[Stage]) -> list[Stage]:
+    return [stage for stage in stages if stage.get("status") == "ready"]
+
+
+def next_executable_child_phase(stages: list[Stage]) -> tuple[Stage, Phase] | None:
+    for stage in executable_v2_stages(stages):
+        ready = executable_child_phases(stage, stages)
+        if ready:
+            return stage, ready[0]
+    return None
 
 
 def phase_stage_map(phases: list[Phase]) -> dict[str, int]:
@@ -594,6 +715,7 @@ def unit_status_counts(units: list[dict[str, Any]], ready: list[dict[str, Any]])
     statuses = ["done", "ready", "in_progress", "blocked", "superseded"]
     counts = {status: sum(1 for unit in units if unit.get("status") == status) for status in statuses}
     counts["ready"] = len(ready)
+    counts["closed"] = sum(1 for unit in units if is_closed_status(unit.get("status")))
     return counts
 
 
@@ -633,7 +755,7 @@ def summarize_roadmap(root: Path, state_dir: Path, roadmap: dict[str, Any]) -> s
     if goal:
         lines.append(f"목표: {goal}")
 
-    lines.append(
+    progress_line = (
         "진행: "
         f"완료 {counts['done']}, "
         f"실행 가능 {counts['ready']}, "
@@ -641,6 +763,7 @@ def summarize_roadmap(root: Path, state_dir: Path, roadmap: dict[str, Any]) -> s
         f"차단 {counts['blocked']}, "
         f"대체됨 {counts['superseded']}"
     )
+    lines.append(progress_line)
 
     if next_phase:
         lines.append(f"다음 단계: {next_phase.get('id')} - {next_phase.get('title', 'Untitled phase')}")
@@ -730,7 +853,22 @@ def parallel_ready_stage_lines(ready: list[Stage]) -> list[str]:
     return lines
 
 
-def stage_flow_lines(stages: list[Stage], ready: list[Stage]) -> list[str]:
+def child_phase_lines(stage: Stage, stages: list[Stage]) -> list[str]:
+    lines: list[str] = []
+    ready_refs = {canonical_phase_ref(stage, phase) for phase in executable_child_phases(stage, stages)}
+    for phase in stage_child_phases(stage):
+        phase_ref = canonical_phase_ref(stage, phase)
+        status = "실행 가능" if phase_ref in ready_refs else STATUS_LABELS.get(str(phase.get("status", "unknown")), str(phase.get("status", "unknown")))
+        title = phase.get("title", "Untitled phase")
+        lines.append(f"    - [{phase_ref} {status}] {title}")
+        depends_on = phase.get("depends_on") or []
+        if depends_on:
+            normalized = [normalize_phase_dependency(stage, dependency) for dependency in depends_on]
+            lines.append(f"      의존: {', '.join(normalized)}")
+    return lines
+
+
+def stage_flow_lines(stages: list[Stage], ready: list[Stage], *, include_child_phases: bool = False) -> list[str]:
     lines = ["Stage Roadmap:"]
     if not stages:
         lines.append("  없음")
@@ -739,19 +877,30 @@ def stage_flow_lines(stages: list[Stage], ready: list[Stage]) -> list[str]:
     ready_ids = {str(stage.get("id")) for stage in ready}
     for stage in stages:
         stage_id = str(stage.get("id", "unknown"))
-        status = "실행 가능" if stage_id in ready_ids else STATUS_LABELS.get(str(stage.get("status", "unknown")), str(stage.get("status", "unknown")))
+        if stage_id in ready_ids and not include_child_phases:
+            status = "실행 가능"
+        else:
+            status = STATUS_LABELS.get(str(stage.get("status", "unknown")), str(stage.get("status", "unknown")))
         title = stage.get("title", "Untitled stage")
         lines.append(f"  [{stage_id} {status}] {title}")
         lines.extend(stage_detail_lines(stage))
+        if include_child_phases:
+            lines.extend(child_phase_lines(stage, stages))
     return lines
 
 
 def summarize_stage_roadmap(root: Path, state_dir: Path, roadmap: dict[str, Any], stages: list[Stage]) -> str:
     stages = enrich_stages_with_local_state(root, stages)
-    ready = executable_stages(stages)
+    v2 = is_v2_roadmap(roadmap)
+    if v2:
+        stages = normalize_v2_stage_statuses(stages)
+        ready = executable_v2_stages(stages)
+    else:
+        ready = executable_stages(stages)
     counts = unit_status_counts(stages, ready)
     blocked = [stage for stage in stages if stage.get("status") == "blocked"]
     next_stage = ready[0] if ready else None
+    next_phase = next_executable_child_phase(stages) if v2 else None
 
     lines = [
         f"저장소: {root}",
@@ -759,10 +908,13 @@ def summarize_stage_roadmap(root: Path, state_dir: Path, roadmap: dict[str, Any]
         f"Git: {git_status(root)}",
         f"로드맵 버전: {roadmap.get('roadmap_version', 'unknown')}",
     ]
+    schema = roadmap_schema(roadmap)
+    if schema:
+        lines.append(f"로드맵 스키마: {schema}")
     goal = roadmap.get("goal")
     if goal:
         lines.append(f"목표: {goal}")
-    lines.append(
+    progress_line = (
         "진행: "
         f"완료 {counts['done']}, "
         f"실행 가능 {counts['ready']}, "
@@ -770,18 +922,43 @@ def summarize_stage_roadmap(root: Path, state_dir: Path, roadmap: dict[str, Any]
         f"차단 {counts['blocked']}, "
         f"대체됨 {counts['superseded']}"
     )
-    if next_stage:
+    if v2:
+        progress_line += f", 닫힘 {counts['closed']}/{len(stages)}"
+    lines.append(progress_line)
+    if v2:
+        if next_stage:
+            lines.append(f"다음 Stage: {next_stage.get('id')} - {next_stage.get('title', 'Untitled stage')}")
+        else:
+            lines.append("다음 Stage: 없음")
+        if next_phase:
+            phase_stage, phase = next_phase
+            lines.append(f"다음 Phase: {canonical_phase_ref(phase_stage, phase)} - {phase.get('title', 'Untitled phase')}")
+        else:
+            lines.append("다음 Phase: 없음")
+    elif next_stage:
         lines.append(f"다음 단계: {next_stage.get('id')} - {next_stage.get('title', 'Untitled stage')}")
     else:
         lines.append("다음 단계: 없음")
 
-    lines.extend(stage_flow_lines(stages, ready))
+    lines.extend(stage_flow_lines(stages, ready, include_child_phases=v2))
     lines.extend(parallel_ready_stage_lines(ready))
     lines.append("실행 가능 단계:")
     if ready:
         lines.extend(f"  - {stage.get('id')} {stage.get('title', 'Untitled stage')}" for stage in ready)
     else:
         lines.append("  없음")
+    if v2:
+        ready_child_phases: list[tuple[Stage, Phase]] = []
+        for stage in ready:
+            ready_child_phases.extend((stage, phase) for phase in executable_child_phases(stage, stages))
+        lines.append("실행 가능 Phase:")
+        if ready_child_phases:
+            lines.extend(
+                f"  - {canonical_phase_ref(stage, phase)} {phase.get('title', 'Untitled phase')}"
+                for stage, phase in ready_child_phases
+            )
+        else:
+            lines.append("  없음")
     lines.append("차단된 단계:")
     if blocked:
         lines.extend(f"  - {stage.get('id')} {stage.get('title', 'Untitled stage')}" for stage in blocked)

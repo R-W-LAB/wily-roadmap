@@ -1,6 +1,5 @@
 stage_id: "s14"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "14-1"
     title: "Stage와 Phase 계층 분리 및 Stage 분해 skill 추가"

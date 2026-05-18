@@ -11,7 +11,7 @@ Durable `.wily` state remains authoritative. Board is a live/provisional project
    Always check Board live config before attempting live reflection.
 3. When live config is available, emit or replay the related Board live/provisional projection:
    - lifecycle status changes use the matching live event such as `start`, `complete`, `block`, or `release`;
-   - Custom Workflow status boards use `wily.py checkpoint-sync <phase-id> --status-board <path>`;
+   - Custom Workflow status boards use `wily.py checkpoint-sync <stage-id>/<phase-id> --status-board <path>`;
    - Stage decomposition topology uses `stage_decomposed_local` and can be replayed with `wily.py board sync-local <stage-id>`.
 4. Verify Board reflection with deterministic evidence such as an emit result, API response, SSE event, or SSR HTML.
 5. Include compact Board evidence for important transitions such as `$wily-run`, `$wily-complete`, `$wily-block`, and `$wily-replan`.

@@ -7,20 +7,21 @@ metadata:
 
 # Wily Start
 
-Use `$wily-start <phase-id>` to open a tracked execution session for an approved phase.
+Use `$wily-start <stage-id>/<phase-id>` to open a tracked execution session for an approved phase. In `wily-roadmap-v2` repositories, the canonical Phase ref is required; Stage ids are not executable. Legacy phase-only refs are accepted only in legacy non-v2 repositories.
 
 This is state-changing. It creates a session, marks the phase `in_progress`, records the phase context bundle, and increments the attempt number.
 
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py start <phase-id>
+python3 <plugin-root>/scripts/wily.py start <stage-id>/<phase-id>
 ```
 
 ## Boundaries
 
 - $wily-start is session bookkeeping only.
 - Run only when the user explicitly chooses to start a phase session.
+- Reject Stage ids; use the suggested next ready Phase, `$wily-decompose-stage`, or `wily migrate-state --to wily-roadmap-v2 --dry-run`.
 - Prefer starting in a fresh agent session.
 - In shared Wily repositories, treat start as a phase claim. Before starting, prefer a fresh pull or clearly note if remote state was not checked.
 - After start, read the generated `session/input.md`.

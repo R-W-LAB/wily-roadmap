@@ -1,6 +1,5 @@
 stage_id: "s06"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "06-1"
     title: "Skill 실행 시 불필요한 출력 줄이기"
@@ -9,6 +8,7 @@ phases:
     depends_on: []
     parallel_group: "06"
     current_session: "sessions/2026-05-12-091127-phase-06-1-attempt-1"
+    runner: "custom-workflow"
 
   - id: "06-2"
     title: "Claude Code 호환성 확보"
@@ -17,6 +17,7 @@ phases:
     depends_on: []
     parallel_group: "06"
     current_session: "sessions/2026-05-12-104138-phase-06-2-attempt-1"
+    runner: "custom-workflow"
 
   - id: "06-3"
     title: "zsh 레포 단독 실행 명령 제공"
@@ -25,6 +26,7 @@ phases:
     depends_on: []
     parallel_group: "06"
     current_session: "sessions/2026-05-12-141729-phase-06-3-attempt-1"
+    runner: "custom-workflow"
 
   - id: "06-4"
     title: "진행된 레포에서 wily-init 동작 계약 확정"
@@ -33,6 +35,7 @@ phases:
     depends_on: []
     parallel_group: "06"
     current_session: "sessions/2026-05-12-144349-phase-06-4-attempt-1"
+    runner: "custom-workflow"
 
   - id: "06-5"
     title: "긴 로드맵 Pane에서 완료 Stage 접기 전략"
@@ -41,3 +44,4 @@ phases:
     depends_on: []
     parallel_group: "06"
     current_session: "sessions/2026-05-12-144349-phase-06-5-attempt-1"
+    runner: "custom-workflow"

@@ -7,21 +7,23 @@ metadata:
 
 # Wily Run
 
-Use `$wily-run <phase-id> [--runner custom-workflow] [--autonomy conservative|goal_scoped|yolo]` to route a selected Wily phase into Custom Workflow Skillset.
+Use `$wily-run <stage-id>/<phase-id> [--runner custom-workflow] [--autonomy conservative|goal_scoped|yolo]` to route a selected Wily phase into Custom Workflow Skillset. In `wily-roadmap-v2` repositories, the canonical Phase ref is required, for example `s27/p04`. Legacy phase-only refs are accepted only in legacy non-v2 repositories.
 
-This is state-changing. It may start or attach to a Wily execution session, creates Custom Workflow request/result artifacts, and marks the phase `in_progress`. It must not mark the phase `done`. Final completion remains a separate verified `$wily-complete <phase-id>` action.
+This is state-changing. It may start or attach to a Wily execution session, creates Custom Workflow request/result artifacts, and marks the phase `in_progress`. It must not mark the phase `done`. Final completion remains a separate verified `$wily-complete <stage-id>/<phase-id>` action.
 
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py run <phase-id> [--runner custom-workflow] [--autonomy conservative|goal_scoped|yolo]
+python3 <plugin-root>/scripts/wily.py run <stage-id>/<phase-id> [--runner custom-workflow] [--autonomy conservative|goal_scoped|yolo] [--dry-run]
 ```
 
 ## Arguments
 
-- `<phase-id>` is required.
+- `<stage-id>/<phase-id>` is required for v2 repositories.
+- Legacy phase-only refs are accepted only in legacy non-v2 repositories.
 - `--runner custom-workflow` is accepted as an alias for `custom-workflow-skillset`.
 - `--autonomy conservative|goal_scoped|yolo` optionally labels the requested autonomy mode.
+- `--dry-run` resolves the Phase and prints the Custom Workflow route without writing session or handoff artifacts.
 
 ## Routing Responsibilities
 
@@ -29,7 +31,7 @@ python3 <plugin-root>/scripts/wily.py run <phase-id> [--runner custom-workflow] 
 
 - read applicable `AGENTS.md`
 - read `.wily/roadmap.yaml`
-- validate that the phase exists and is executable
+- validate that the Phase exists, is executable, and is not a Stage id
 - record the Custom Workflow Skillset engine and autonomy mode
 - start or attach the Wily session
 - build a concise phase context request for Custom Workflow Skillset
@@ -43,7 +45,7 @@ python3 <plugin-root>/scripts/wily.py run <phase-id> [--runner custom-workflow] 
 - after Custom Workflow finishes, copy or ensure its summary, changed files, verification evidence, blocker text, and recommended Wily status are in `custom-workflow-result.md`
 - never mark the Wily phase `done`
 
-Custom Workflow checkpoint/status-board updates should be reflected to Board through `checkpoint-sync` or an equivalent helper path. The Board event is `checkpoint_updated`, and the runner should retain deterministic evidence from the emit result, API, SSE, or SSR HTML.
+Custom Workflow checkpoint/status-board updates should be reflected to Board through `checkpoint-sync <stage-id>/<phase-id> --status-board <path>` or an equivalent helper path. The Board event is `checkpoint_updated`, and the runner should retain deterministic evidence from the emit result, API, SSE, or SSR HTML.
 
 The Wily plugin does not bundle Custom Workflow implementation files and does not require bundled runner files. It routes the active agent to the installed `custom-workflow-skillset` plugin by skill name. Custom Workflow may recommend `needs_review`, `blocked`, `ready`, or `done`, but Wily completion still requires verification evidence and `$wily-complete`.
 
@@ -75,4 +77,4 @@ Remote actions and destructive actions remain approval-first in every mode.
 - Keep safety-critical approval requirements when they apply.
 - Report the phase id, selected workflow engine, selected autonomy mode, and whether the Custom Workflow request/result files are available.
 - Report the session path, request path, result path, required `custom-workflow-skillset:plan-goal-runner` route, and exact native goal command when routing succeeds.
-- Tell the user that `$wily-run` does not complete the phase; use `$wily-complete <phase-id>` only after verification evidence exists.
+- Tell the user that `$wily-run` does not complete the phase; use `$wily-complete <stage-id>/<phase-id>` only after verification evidence exists.

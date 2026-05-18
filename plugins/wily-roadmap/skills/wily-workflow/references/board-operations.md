@@ -10,7 +10,7 @@ This reference is the Wily plugin-side operations checklist for reflecting local
 3. Emit or replay the Board projection:
    The normal operation is to emit or replay the best available projection.
    - lifecycle/session changes emit the corresponding live event;
-   - runner checkpoint overlays use `wily.py checkpoint-sync <phase-id> --status-board <path>`;
+   - runner checkpoint overlays use `wily.py checkpoint-sync <stage-id>/<phase-id> --status-board <path>`;
    - local Stage decomposition drafts use `wily.py board sync-local <stage-id>` and `stage_decomposed_local`.
 4. Verify with deterministic evidence first: emit result cache, API response, SSE event, or SSR HTML.
 5. Use actual-site visual verification only when deterministic verification fails, reports a mismatch, UI/rendering changed, or the user explicitly asks for visual confirmation.

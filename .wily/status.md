@@ -1,22 +1,21 @@
 # Wily Status
 
-Roadmap version 24 is complete through Stage s20, Stage s22, and Stage s23. Stage s21 is now the next decomposed Stage.
+Roadmap schema `wily-roadmap-v2` is complete through Stage s30. Stages s25 and s26 remain canceled as `superseded`.
 
 Current baseline:
-- Stage s15 is complete. `R-W-LAB/wily-board` exists as a separate FastAPI/SQLite/htmx dashboard and is deployed at `https://rnwlab.duckdns.org`.
-- Existing Board sync reads committed `.wily/roadmap.yaml` and `.wily/**/stage.yaml` from GitHub after push-triggered signed webhooks.
-- Stage s16 adds push-before-local work visibility as a provisional Board overlay while keeping committed `.wily` state authoritative.
-- Phase 16-1 is implemented and verified: Board now has `live_sessions` storage, signed `POST /api/live/events`, live event audit logging, and durable-sync clearing for matching `completed_local` and `blocked_local` overlays.
-- Phase 16-2 is implemented and verified: Board repo detail and Active right now views render provisional live chips without changing durable status/progress.
-- Phase 16-3 is implemented and verified: Wily CLI emits best-effort signed live events from start, block, and complete when opt-in Board config is present.
-- Phase 16-4 is implemented and verified: operations docs and a local HTTP smoke confirm CLI-to-Board live event delivery before push.
-- Stage s17 is implemented and verified: Wily CLI now supports lightweight `live-heartbeat`; Board classifies live sessions as fresh, recent, or stale; stale sessions remain visible on repo detail but no longer occupy Active right now or block Up next.
-- Stage s18 is implemented and verified: Board shows claim conflict warnings, a Needs follow-up queue, and repository sync health.
-- Stage s19 is implemented and verified: Board shows deterministic Attention risk items for blockers, dependency bottlenecks, stale work, awaiting-push risk, and unclaimed ready work.
-- Stage s20 is implemented and verified: shared repos are visible to `airmang` and `Julirsia`, while personal repos are visible only to `visible_to`; `All`, `Shared`, and `Mine` filters are available.
-- Stage s22 is implemented and verified: local Stage/Phase work appears in `wily-watch` and Wily Board with session-scoped heartbeat, token-zero `worked` events, local-only overlays, and durable sync attach.
-- Stage s23 is implemented and verified: local Stage decomposition now emits live draft topology, Wily Board stores it as provisional `live_drafts`, renders draft child phases before push, and clears drafts after durable GitHub sync.
-- Stage s21 is ready and decomposed: redesign the Wily Board into a read-only multi-repo personal work dashboard using the Stage s22/s23 live activity model, FastAPI JSON/SSE APIs, and a Next.js frontend cutover.
+- Stage s15 created and deployed `R-W-LAB/wily-board` as the separate Wily Board service.
+- Stages s16-s20 added live local work overlays, heartbeat freshness, collaboration operations, risk/attention views, and personal/shared repo visibility.
+- Stage s21 delivered the read-only Next.js Wily Board UI redesign.
+- Stage s22 connected Wily Roadmap realtime activity heartbeat into `wily-watch` and Wily Board.
+- Stage s23 added provisional live draft topology overlays for local Stage decomposition.
+- Stage s24 hardened the realtime Board bridge end to end across Wily live sessions, CustomWorkflow checkpoint status, Codex worked signals, Board API/SSE/UI, and local E2E proof.
+- Stage s28 completed the Wily Board read-only cutover by removing legacy Jinja/mutating routes from the active app.
+- Stage s29 lifted the Wily Board frontend stack onto Tailwind, shadcn/ui primitives, Framer Motion, TanStack Query invalidation, next-themes, date-fns Korean relative time, sanitized markdown rendering, and generated OpenAPI types.
+- Stage s30 completed Wily Board DAG dagre layout, Headline and Attention components, mobile stage-list/bottom-sheet fallback, and repo switcher/pin ordering polish.
+
+Verification:
+- s29 verification evidence is recorded in `.wily/stages/s29-board-polish-stack-lift/verification.md`.
+- s30 verification evidence is recorded in `.wily/stages/s30-board-dag-components-mobile/verification.md`.
 
 Next action:
-- Start Phase 21-1 to reconcile the redesign contract with the current `R-W-LAB/wily-board` codebase and write the implementation plan.
+- Stage s31 is ready: Heartbeat 잔여 + SSE polish.

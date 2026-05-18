@@ -7,14 +7,14 @@ metadata:
 
 # Wily Retry
 
-Use `$wily-retry <phase-id>` to create a new session attempt for an unfinished phase.
+Use `$wily-retry <stage-id>/<phase-id>` to create a new session attempt for an unfinished phase. In `wily-roadmap-v2` repositories, the canonical Phase ref is required; Stage ids are not executable. Legacy phase-only refs are accepted only in legacy non-v2 repositories.
 
 This is state-changing. It preserves prior attempts, creates the next attempt session, and marks the phase `in_progress`.
 
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py retry <phase-id>
+python3 <plugin-root>/scripts/wily.py retry <stage-id>/<phase-id>
 ```
 
 ## Boundaries

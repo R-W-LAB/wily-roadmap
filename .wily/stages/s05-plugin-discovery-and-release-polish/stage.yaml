@@ -1,6 +1,5 @@
 stage_id: "s05"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "05-1"
     title: "wily-status에서 Roadmap 출력 예시 보여주기"
@@ -9,6 +8,7 @@ phases:
     depends_on: []
     parallel_group: "05"
     current_session: "sessions/2026-05-11-224438-phase-05-1-attempt-1"
+    runner: "custom-workflow"
 
   - id: "05-2"
     title: "긴 Phase 제목 표시 방식 개선 검토"
@@ -17,6 +17,7 @@ phases:
     depends_on: []
     parallel_group: "05"
     current_session: "sessions/2026-05-11-224438-phase-05-2-attempt-1"
+    runner: "custom-workflow"
 
   - id: "05"
     title: "Plugin discovery and release polish"
@@ -25,3 +26,4 @@ phases:
     depends_on: ["05-1", "05-2"]
     parallel_group: null
     current_session: "sessions/2026-05-12-084025-phase-05-attempt-1"
+    runner: "custom-workflow"

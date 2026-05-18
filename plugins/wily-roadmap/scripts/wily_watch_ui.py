@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import wily_state_summary
+import wily_projection
 
 
 Phase = dict[str, Any]
@@ -110,6 +111,8 @@ class _RoadmapView:
 
     @property
     def done(self) -> int:
+        if self.is_stage_mode and wily_state_summary.is_v2_roadmap(self.roadmap or {}):
+            return sum(1 for phase in self.phases if wily_state_summary.is_closed_status(phase.get("status")))
         return sum(1 for phase in self.phases if phase.get("status") == "done")
 
 
@@ -125,8 +128,13 @@ def _load(root: Path) -> _RoadmapView:
     is_stage_mode = bool(stages)
     if is_stage_mode:
         stages = wily_state_summary.enrich_stages_with_local_state(root, stages)
+        if wily_state_summary.is_v2_roadmap(roadmap):
+            stages = wily_state_summary.normalize_v2_stage_statuses(stages)
     phases = stages if is_stage_mode else roadmap.get("phases") or []
-    ready = wily_state_summary.executable_stages(stages) if is_stage_mode else wily_state_summary.executable_phases(phases)
+    if is_stage_mode and wily_state_summary.is_v2_roadmap(roadmap):
+        ready = wily_state_summary.executable_v2_stages(stages)
+    else:
+        ready = wily_state_summary.executable_stages(stages) if is_stage_mode else wily_state_summary.executable_phases(phases)
     return _RoadmapView(
         root=root,
         has_state=True,
@@ -806,6 +814,13 @@ def _node_line(
     return _crop_line(line, width)
 
 
+def _is_closed_node(phase: Phase, *, stage_mode: bool) -> bool:
+    status = phase.get("status")
+    if status == "done":
+        return True
+    return stage_mode and wily_state_summary.is_closed_status(status)
+
+
 def _flat_lines2(
     phases: list[Phase],
     ready_ids: set[str],
@@ -842,7 +857,7 @@ def _flat_lines2(
                     live_detail=_live_detail_for_phase(live_items or [], phase),
                 )
             )
-            kinds.append("done" if phase.get("status") == "done" else "node")
+            kinds.append("done" if _is_closed_node(phase, stage_mode=stage_mode) else "node")
             child_lines, child_kinds = _child_phase_lines(
                 phase,
                 width=width,
@@ -965,7 +980,7 @@ def _stage_phase_detail_parts(child_phases: list[Any]) -> list[str]:
     if total == 0:
         return parts
 
-    done = sum(1 for child in valid_children if child.get("status") == "done")
+    done = sum(1 for child in valid_children if wily_state_summary.is_closed_status(child.get("status")))
     phase_word = "phase" if total == 1 else "phases"
     parts.append(f"{done}/{total} {phase_word}")
 
@@ -991,7 +1006,7 @@ def _frontier_child_phase(children: list[Phase]) -> Phase | None:
         if str(child.get("id", "?")) in ready_ids:
             return child
     for child in children:
-        if child.get("status") != "done":
+        if not wily_state_summary.is_closed_status(child.get("status")):
             return child
     return None
 
@@ -1033,7 +1048,7 @@ def _child_phase_lines(
                 live_detail=_live_detail_for_phase(live_items or [], child),
             )
         )
-        kinds.append("child-done" if child.get("status") == "done" else "child-node")
+        kinds.append("child-done" if wily_state_summary.is_closed_status(child.get("status")) else "child-node")
     return lines, kinds
 
 
@@ -1130,13 +1145,13 @@ def _preserve_unfinished_lines(lines: list[Line], kinds: list[str]) -> tuple[lis
 
 def _frontier_stage_index(stages: list[list[Phase]], ready_ids: set[str]) -> int | None:
     for index, stage in enumerate(stages):
-        if all(phase.get("status") == "done" for phase in stage):
+        if all(_is_closed_node(phase, stage_mode=True) for phase in stage):
             continue
         if any(str(phase.get("id", "?")) in ready_ids for phase in stage):
             return index
 
     for index, stage in enumerate(stages):
-        if any(phase.get("status") != "done" for phase in stage):
+        if any(not _is_closed_node(phase, stage_mode=True) for phase in stage):
             return index
     return None
 
@@ -1198,7 +1213,11 @@ def _compact_frontier_lines(
     lines: list[Line] = []
     kinds: list[str] = []
     done_prefix = stages[:frontier_index]
-    done_stages_done = [stage for stage in done_prefix if all(phase.get("status") == "done" for phase in stage)]
+    done_stages_done = [
+        stage
+        for stage in done_prefix
+        if all(_is_closed_node(phase, stage_mode=view.is_stage_mode) for phase in stage)
+    ]
     if view.is_stage_mode:
         done_count = len(done_stages_done)
         summary_unit = "stage"

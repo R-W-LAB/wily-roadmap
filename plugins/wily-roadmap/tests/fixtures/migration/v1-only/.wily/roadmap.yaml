@@ -1,0 +1,15 @@
+roadmap_version: 1
+goal: "Legacy phase-only roadmap"
+phases:
+  - id: "01"
+    title: "Audit"
+    path: "phases/01-audit"
+    status: "done"
+    depends_on: []
+    owner: "codex"
+  - id: "02"
+    title: "Build"
+    path: "phases/02-build"
+    status: "pending"
+    depends_on: ["01"]
+    owner: "codex"

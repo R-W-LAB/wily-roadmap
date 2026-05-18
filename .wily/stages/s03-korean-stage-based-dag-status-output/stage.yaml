@@ -1,6 +1,5 @@
 stage_id: "s03"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "03"
     title: "Korean stage-based DAG status output"
@@ -9,3 +8,4 @@ phases:
     depends_on: []
     parallel_group: null
     current_session: "sessions/2026-05-11-125059-phase-03-attempt-1"
+    runner: "custom-workflow"

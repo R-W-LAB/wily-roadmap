@@ -1,6 +1,5 @@
 stage_id: "s10"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "10-1"
     title: "Zip bootstrap에서 GitHub self-update 경로 제공"

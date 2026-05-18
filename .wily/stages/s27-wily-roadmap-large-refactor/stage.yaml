@@ -1,0 +1,10 @@
+stage_id: "s27"
+schema: "wily-roadmap-v2"
+phases:
+  - id: "p01"
+    title: "Wily Roadmap 대규모 리팩토링"
+    status: "done"
+    depends_on: []
+    owner: "codex"
+    runner: "custom-workflow"
+    path: "stages/s27-wily-roadmap-large-refactor/phases/p01-wily-roadmap"

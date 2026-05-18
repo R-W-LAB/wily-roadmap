@@ -1,6 +1,5 @@
 stage_id: "s11"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "11-1"
     title: "Custom Workflow bundled runner 제거와 참조 전용 회귀"

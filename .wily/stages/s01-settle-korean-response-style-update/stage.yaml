@@ -1,6 +1,5 @@
 stage_id: "s01"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "01"
     title: "Settle Korean response-style update"
@@ -8,3 +7,4 @@ phases:
     status: "done"
     depends_on: []
     parallel_group: null
+    runner: "custom-workflow"

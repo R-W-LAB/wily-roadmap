@@ -1,6 +1,5 @@
 stage_id: "s19"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "19-1"
     title: "Risk signal model and scoring"

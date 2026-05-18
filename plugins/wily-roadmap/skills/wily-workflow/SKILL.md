@@ -11,7 +11,7 @@ metadata:
 
 Use this skill to manage large software work with Wily's local roadmap model. Wily stores project state in `.wily/`, splits large goals into Stage DAGs, tracks dependencies and parallel candidates, records each execution attempt as a session, and preserves completed history when plans change.
 
-Wily owns the Roadmap Plan. Stage is the primary collaboration and merge-boundary unit. Phase is optional Stage-local decomposition created only by `$wily-decompose-stage`. Custom Workflow Skillset may own detailed Phase Implementation Plans and execution packages when a Stage or Phase truly needs one. `$wily-run` routes one selected Phase to `custom-workflow-skillset:plan-goal-runner`, with `custom-workflow-skillset:parallel-lane-runner` available only for approved bounded lanes. Wily still owns dependencies, attempts, status transitions, replans, and durable session history. Keep non-run command handling fast: Wily command skills should not invoke external planners or broad verification just to inspect, start, retry, block, or complete roadmap state.
+Wily owns the Roadmap Plan. In `wily-roadmap-v2`, Stage is the collaboration, aggregation, and merge-boundary unit; Phase is the only execution unit and is identified as `<stage-id>/<phase-id>`. Custom Workflow Skillset may own detailed Phase Implementation Plans and execution packages when a Phase truly needs one. `$wily-run` routes one selected Phase to `custom-workflow-skillset:plan-goal-runner`, with `custom-workflow-skillset:parallel-lane-runner` available only for approved bounded lanes. Wily still owns dependencies, attempts, status transitions, replans, and durable session history. Keep non-run command handling fast: Wily command skills should not invoke external planners or broad verification just to inspect, start, retry, block, or complete roadmap state.
 
 When a repository shares Wily state through Git, Wily should guide collaborators toward a lightweight source-of-truth split: commit durable roadmap state, keep active execution sessions local, pull before claiming phases, and commit/push roadmap progress only when the user has approved remote work.
 
@@ -45,13 +45,14 @@ $wily-status
 $wily-watch
 $wily-issues
 $wily-next
-$wily-start <phase-id>
+$wily-start <stage-id>/<phase-id>
 $wily-decompose-stage <stage-id>
-$wily-complete <phase-id>
-$wily-block <phase-id> "<reason>"
-$wily-retry <phase-id>
+$wily-complete <stage-id>/<phase-id>
+$wily-block <stage-id>/<phase-id> "<reason>"
+$wily-retry <stage-id>/<phase-id>
 $wily-replan
-$wily-run <phase-id>
+$wily-run <stage-id>/<phase-id>
+python3 <plugin-root>/scripts/wily.py migrate-state --to wily-roadmap-v2 --dry-run
 ```
 
 For deterministic local state operations, use the helper script:
@@ -60,11 +61,11 @@ For deterministic local state operations, use the helper script:
 python3 <plugin-root>/scripts/wily.py <command>
 ```
 
-The script handles repeatable filesystem work such as `init`, `status`, `next`, `start`, `complete`, `block`, `retry`, `replan`, and one-shot `watch` rendering. The active agent still owns interpretation, user approval, phase design, planner selection, implementation, and verification.
+The script handles repeatable filesystem work such as `init`, `status`, `next`, `start`, `complete`, `land`, `block`, `retry`, `replan`, and one-shot `watch` rendering. The active agent still owns interpretation, user approval, phase design, planner selection, implementation, and verification.
 
 `$wily-init` scans the repository. If the user already provided a final goal, combine that goal with the scan. If not, summarize the current implementation first, then ask for the intended final outcome before creating a roadmap. New roadmaps should use top-level `stages:` with `depends_on`, `owner`, and `write_scope` so ready Stages can be assigned safely in parallel.
 
-`$wily-next` shows the recommended executable Stage or legacy phase, including `pending` units whose dependencies are `done`, plus dependencies, expected files, prompt, and verification. Ask before implementation.
+`$wily-next` shows the next ready Stage and next executable Phase. In v2, Stage is not executable; ask before implementation and use the reported `<stage-id>/<phase-id>` Phase ref for execution.
 
 `$wily-status` renders the current `Wily Roadmap` pane once. It uses the same visual roadmap renderer as `$wily-watch`, including the progress bar, stage lines, phase glyphs, dependency hints, and git footer. Do not replace it with the fallback prose or stage-summary output.
 
@@ -72,13 +73,17 @@ The script handles repeatable filesystem work such as `init`, `status`, `next`, 
 
 `$wily-issues` explicitly inspects optional GitHub Issues linkage. Its default mode is read-only; approved local roadmap additions use Wily state only and do not write to GitHub.
 
-`$wily-start <id>` records an approved Stage or Phase session and marks it `in_progress`. This command is session bookkeeping only: after reporting the session path, stop. Do not create plans, edit target files, run implementation verification, or continue into implementation in the same turn. A separate explicit user request after the start result is required before implementation.
+`$wily-start <id>` records an approved Phase session and marks it `in_progress`. In v2, Stage ids are rejected with next-Phase or migration guidance. This command is session bookkeeping only: after reporting the session path, stop. Do not create plans, edit target files, run implementation verification, or continue into implementation in the same turn. A separate explicit user request after the start result is required before implementation.
 
 `$wily-decompose-stage <id>` explicitly decomposes one Stage into Stage-local child Phases and optional lanes under `.wily/stages/<stage-id>/stage.yaml`. It must not run automatically from init or start. Use lane `write_scope` values to decide whether later subagent execution is parallel-safe.
 
-`$wily-run <id>` records or attaches a Wily session, writes a Custom Workflow request/result artifact pair, and routes the active agent through `custom-workflow-skillset:plan-goal-runner`. If the generated execution package allows parallel lanes, route those bounded lanes through `custom-workflow-skillset:parallel-lane-runner`. The Custom Workflow result must be written to `custom-workflow-result.md` before `$wily-complete` or `$wily-block`.
+`wily migrate-state --to wily-roadmap-v2 --dry-run` inspects legacy or mixed roadmap state without mutation. `--apply` writes a backup and migration reports before converting to v2. `--prune-legacy` is an explicit cleanup mode and must not be run as a default.
+
+`$wily-run <id>` records or attaches a Wily session, writes a Custom Workflow request/result artifact pair, and routes the active agent through `custom-workflow-skillset:plan-goal-runner`. Use `--dry-run` to verify Phase resolution and route output without mutation. If the generated execution package allows parallel lanes, route those bounded lanes through `custom-workflow-skillset:parallel-lane-runner`. The Custom Workflow result must be written to `custom-workflow-result.md` before `$wily-complete` or `$wily-block`.
 
 `$wily-complete <id>` marks a phase `done` after verification evidence and review requirements are satisfied.
+
+`$wily-land <id>` is the explicit post-completion Git handoff. It commits current repository changes, pushes the current branch, and either fast-forward lands the branch onto the base branch or opens a PR. Keep this separate from `$wily-complete`.
 
 `$wily-block <id>` records a blocker in roadmap state and the current session.
 
@@ -155,6 +160,7 @@ Stage and Phase human-readable content should be Korean unless the user explicit
 ## Operating Rules
 
 - Prefer local completion. Do not push, open PRs, merge, delete user work, or run destructive commands unless the user explicitly asks.
+- Treat `$wily-land` as that explicit request for its documented commit, push, PR, and direct fast-forward merge behavior only.
 - Before implementation, name the Stage or Phase and the files or modules you expect to touch.
 - In shared Wily repositories, remind the user to pull before claiming work and to keep code changes plus shared Wily state together in commits.
 - If detailed internal breakdown is needed, use `$wily-decompose-stage` explicitly. Do not decompose automatically.

@@ -1,0 +1,10 @@
+stage_id: "s01"
+schema: "wily-roadmap-v2"
+phases:
+  - id: "p01"
+    title: "Foundation"
+    status: "done"
+    depends_on: []
+    owner: "codex"
+    runner: "custom-workflow"
+    path: "stages/s01-foundation/phases/p01-foundation"

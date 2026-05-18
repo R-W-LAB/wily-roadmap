@@ -1,6 +1,5 @@
 stage_id: "s02"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "02"
     title: "Harden command skill consistency"
@@ -9,3 +8,4 @@ phases:
     depends_on: []
     parallel_group: null
     current_session: "sessions/2026-05-11-114923-phase-02-attempt-1"
+    runner: "custom-workflow"

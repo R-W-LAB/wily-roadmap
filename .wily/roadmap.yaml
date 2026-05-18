@@ -1,6 +1,5 @@
-roadmap_version: 26
-roadmap_schema: "stage-v1"
 goal: "wily roadmap 플러그인을 다듬는 중이야."
+roadmap_schema: "wily-roadmap-v2"
 stages:
   - id: "s01"
     title: "Settle Korean response-style update"
@@ -226,3 +225,78 @@ stages:
     owner: "codex"
     task: "turn the S21 checkpoint/live bridge requirements into a verified end-to-end path from Wily live session, CustomWorkflow status board, and Codex hook activity through Board API/SSE/UI, with local E2E proof before approval-gated production smoke"
     current_session: "sessions/2026-05-17-105613-phase-24-3-attempt-1"
+
+  - id: "s25"
+    title: "Wily Board UI polish and usability improvements"
+    path: "stages/s25-wily-board-ui-polish-usability"
+    status: "superseded"
+    depends_on: ["s24"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "improve the Wily Board daily-use UI after realtime bridge stabilization: scanability, navigation, responsive layout, live-update feedback, and visual QA without changing roadmap authority or adding mutation workflows"
+    superseded_by: "s27"
+    superseded_reason: "대규모 리팩토링 중심으로 로드맵을 재정렬하면서 남은 UI polish 작업을 취소함"
+
+  - id: "s26"
+    title: "Wily Roadmap plugin 개선 및 정리"
+    path: "stages/s26-wily-roadmap-plugin-improvement-cleanup"
+    status: "superseded"
+    depends_on: ["s25"]
+    execution_mode: "direct"
+    decomposition_status: "none"
+    owner: "codex"
+    task: "플러그인 cache 반영, skill/command 문서 일관성, CLI 테스트 격리, handoff/roadmap 운영 문서, release update 흐름을 정리해서 Wily Roadmap plugin을 유지보수하기 쉽게 만든다"
+    superseded_by: "s27"
+    superseded_reason: "대규모 리팩토링 Stage에 plugin 개선과 정리 범위를 흡수함"
+
+  - id: "s27"
+    title: "Wily Roadmap 대규모 리팩토링"
+    path: "stages/s27-wily-roadmap-large-refactor"
+    status: "done"
+    depends_on: ["s24"]
+    execution_mode: "direct"
+    decomposition_status: "none"
+    owner: "codex"
+    task: "Wily Roadmap plugin의 CLI, skill 계약, Board live reflection, roadmap state model, test isolation, cache/update 흐름을 한 번에 재정렬하는 대규모 리팩토링을 설계하고 실행한다"
+
+  - id: "s28"
+    title: "Wily Board read-only cutover + 레거시 제거"
+    path: "stages/s28-board-readonly-cutover"
+    status: "done"
+    depends_on: ["s24"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "Next.js 프론트가 살아있는 상태에서 남아있는 Jinja 템플릿과 PR/status mutating 라우트를 실제로 제거해 UI redesign spec의 read-only 원칙을 코드 레벨에서 보장한다"
+    current_session: "sessions/2026-05-18-120345-phase-s28-28-4-attempt-1"
+
+  - id: "s29"
+    title: "Wily Board polish stack lift (Tailwind+shadcn+Framer+TanStack)"
+    path: "stages/s29-board-polish-stack-lift"
+    status: "done"
+    depends_on: ["s28"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "UI redesign spec §4가 약속한 Linear-tier 폴리시를 가능하게 하는 Tailwind, shadcn/ui, framer-motion, TanStack Query, next-themes, date-fns, react-markdown, openapi-typescript 라이브러리 인프라를 들여온다"
+
+  - id: "s30"
+    title: "Wily Board DAG dagre + 누락 컴포넌트 + 모바일"
+    path: "stages/s30-board-dag-components-mobile"
+    status: "done"
+    depends_on: ["s29"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "DAG 레이아웃을 dagre로 교체하고 Headline, Attention 컴포넌트를 추가하며 모바일에서 DAG는 세로 list로, rail은 bottom sheet로 fallback하고 repo switcher/pin 정렬을 다듬어 spec §5/§8을 완성한다"
+
+  - id: "s31"
+    title: "Heartbeat 잔여 (renamed/event_id/secrets/TTL) + SSE polish"
+    path: "stages/s31-heartbeat-tail-sse-polish"
+    status: "pending"
+    depends_on: ["s24"]
+    execution_mode: "decomposed"
+    decomposition_status: "applied"
+    owner: "codex"
+    task: "wily-board-local-activity-heartbeat 플랜의 마무리 항목(renamed event, event_id+dedup, WILY_BOARD_SECRETS 듀얼 시크릿 회전, HEARTBEAT_TTL env 기본값)과 spec §6.3 SSE 거동(per-page 필터, exponential backoff, tab visibility)을 정합한다"

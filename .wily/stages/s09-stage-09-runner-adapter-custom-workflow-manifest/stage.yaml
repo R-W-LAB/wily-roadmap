@@ -1,6 +1,5 @@
 stage_id: "s09"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "09-1"
     title: "Runner adapter 계약과 Custom Workflow manifest 정의"

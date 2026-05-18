@@ -1,6 +1,5 @@
 stage_id: "s04"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "04-1"
     title: "Improve init roadmap authoring"
@@ -9,6 +8,7 @@ phases:
     depends_on: []
     parallel_group: "04"
     current_session: "sessions/2026-05-11-222656-phase-04-1-attempt-1"
+    runner: "custom-workflow"
 
   - id: "04-2"
     title: "Harden lifecycle status CLI"
@@ -17,3 +17,4 @@ phases:
     depends_on: []
     parallel_group: "04"
     current_session: "sessions/2026-05-11-222658-phase-04-2-attempt-1"
+    runner: "custom-workflow"

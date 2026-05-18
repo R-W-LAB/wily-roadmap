@@ -1,6 +1,5 @@
 stage_id: "s08"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "08-1"
     title: "Watch pane Stage별 접기 펼치기 인터랙션"
@@ -9,6 +8,7 @@ phases:
     depends_on: []
     parallel_group: "08"
     current_session: "sessions/2026-05-14-145850-phase-08-1-attempt-1"
+    runner: "custom-workflow"
 
   - id: "08-2"
     title: "협업용 Wily state Git 동기화 정책"
@@ -19,3 +19,4 @@ phases:
     runner_preferred: "manual"
     autonomy_mode: "goal_scoped"
     current_session: "sessions/2026-05-14-163245-phase-08-2-attempt-1"
+    runner: "custom-workflow"

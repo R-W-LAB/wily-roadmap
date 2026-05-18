@@ -7,14 +7,14 @@ metadata:
 
 # Wily Block
 
-Use `$wily-block <phase-id> "<reason>"` to record that a phase is blocked.
+Use `$wily-block <stage-id>/<phase-id> "<reason>"` to record that a phase is blocked. In `wily-roadmap-v2` repositories, the canonical Phase ref is required; Stage ids are not executable. Legacy phase-only refs are accepted only in legacy non-v2 repositories.
 
 This is state-changing. It marks the phase `blocked`, records the blocker in roadmap state, and marks the current session `blocked`.
 
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py block <phase-id> "<reason>"
+python3 <plugin-root>/scripts/wily.py block <stage-id>/<phase-id> "<reason>"
 ```
 
 ## When To Use

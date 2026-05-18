@@ -7,14 +7,14 @@ metadata:
 
 # Wily Complete
 
-Use `$wily-complete <phase-id>` to mark a verified phase as done.
+Use `$wily-complete <stage-id>/<phase-id>` to mark a verified phase as done. In `wily-roadmap-v2` repositories, the canonical Phase ref is required; Stage ids are not executable. Legacy phase-only refs are accepted only in legacy non-v2 repositories.
 
 This is state-changing. It marks the phase `done`, clears stale phase blocker metadata, marks the current session `verified` when one exists, and snapshots Custom Workflow Skillset result artifacts back into the session archive when they exist.
 
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py complete <phase-id>
+python3 <plugin-root>/scripts/wily.py complete <stage-id>/<phase-id>
 ```
 
 ## Required Before Running

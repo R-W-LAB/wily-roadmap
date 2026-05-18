@@ -35,6 +35,7 @@
       "$wily-next: show the next ready phase",
       "$wily-decompose-stage <stage-id>: explicitly split a Stage into Phases and parallel lanes",
       "$wily-run <phase-id>: route a phase through Custom Workflow Skillset",
+      "$wily-land <stage-id>/<phase-id>: commit, push, and land completed work",
       "$wily-update: check or apply Wily plugin updates"
     ],
     "brandColor": "#2563EB"

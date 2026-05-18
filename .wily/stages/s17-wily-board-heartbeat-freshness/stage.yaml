@@ -1,6 +1,5 @@
 stage_id: "s17"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "17-1"
     title: "Heartbeat event contract and Board freshness model"

@@ -74,6 +74,39 @@ class LoadTest(unittest.TestCase):
             self.assertEqual({str(p["id"]) for p in view.ready}, {"02"})
             self.assertEqual(set(view.by_id), {"01", "02"})
 
+    def test_load_counts_superseded_v2_stages_as_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_roadmap(Path(tmp), "\n".join([
+                'roadmap_version: 30',
+                'roadmap_schema: "wily-roadmap-v2"',
+                'stages:',
+                '  - id: "s01"',
+                '    title: "Foundation"',
+                '    status: "done"',
+                '    depends_on: []',
+                '    phases:',
+                '      - id: "p01"',
+                '        title: "Foundation phase"',
+                '        status: "done"',
+                '  - id: "s02"',
+                '    title: "Superseded plan"',
+                '    status: "superseded"',
+                '    depends_on: ["s01"]',
+                '  - id: "s03"',
+                '    title: "Replacement"',
+                '    status: "done"',
+                '    depends_on: ["s01"]',
+                '    phases:',
+                '      - id: "p01"',
+                '        title: "Replacement phase"',
+                '        status: "done"',
+            ]))
+
+            view = wily_watch_ui._load(Path(tmp))
+
+            self.assertEqual(view.done, 3)
+            self.assertEqual(view.total, 3)
+
 
 class TruncateAndEmitTest(unittest.TestCase):
     def test_truncate_keeps_short_text(self) -> None:
@@ -1025,6 +1058,48 @@ class RenderWatchTest(unittest.TestCase):
             self.assertIn("2 stages done", out)
             self.assertNotIn("5 phases done", out)
             self.assertIn("14-2", out)
+
+    def test_stage_first_progress_counts_superseded_stages_as_closed(self) -> None:
+        body = "\n".join([
+            'roadmap_version: 30',
+            'roadmap_schema: "wily-roadmap-v2"',
+            'stages:',
+            '  - id: "s01"',
+            '    title: "Foundation"',
+            '    status: "done"',
+            '    depends_on: []',
+            '    phases:',
+            '      - id: "p01"',
+            '        title: "Foundation phase"',
+            '        status: "done"',
+            '  - id: "s02"',
+            '    title: "Superseded plan"',
+            '    status: "superseded"',
+            '    depends_on: ["s01"]',
+            '    phases:',
+            '      - id: "p01"',
+            '        title: "Superseded phase"',
+            '        status: "superseded"',
+            '  - id: "s03"',
+            '    title: "Replacement"',
+            '    status: "done"',
+            '    depends_on: ["s01"]',
+            '    phases:',
+            '      - id: "p01"',
+            '        title: "Replacement phase"',
+            '        status: "done"',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self._make(project, body)
+
+            out = wily_watch_ui.render_watch(
+                project, interval=2.0, rich=False, size=(100, 10)
+            )
+
+            self.assertIn("3/3 - 100%", out)
+            self.assertIn("3 stages done", out)
+            self.assertNotIn("Superseded phase", out)
 
     def test_render_falls_back_to_flat_for_skip_dag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

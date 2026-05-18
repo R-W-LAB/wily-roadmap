@@ -268,15 +268,22 @@ def fetch_board_live_claims(phase: Phase) -> list[dict[str, Any]]:
     config = board_live_config()
     if config is None:
         return []
-    query = urllib.parse.urlencode(
-        {
-            "repo": config["WILY_BOARD_REPO"],
-            "phase_id": str(phase.get("id", "")),
-            "actor": config["WILY_BOARD_ACTOR"],
-        }
-    )
+    phase_id = str(phase.get("phase_id") or phase.get("id", ""))
+    stage_id = str(phase.get("stage_id") or "")
+    if "/" in phase_id:
+        inferred_stage_id, inferred_phase_id = phase_id.split("/", 1)
+        stage_id = stage_id or inferred_stage_id
+        phase_id = inferred_phase_id
+    query = {
+        "repo": config["WILY_BOARD_REPO"],
+        "phase_id": phase_id,
+        "actor": config["WILY_BOARD_ACTOR"],
+    }
+    if stage_id:
+        query["stage_id"] = stage_id
+    query_string = urllib.parse.urlencode(query)
     request = urllib.request.Request(
-        config["WILY_BOARD_URL"].rstrip("/") + f"/api/live/claims?{query}",
+        config["WILY_BOARD_URL"].rstrip("/") + f"/api/live/claims?{query_string}",
         method="GET",
         headers={"X-Wily-Signature": board_live_signature(config["WILY_BOARD_SECRET"], b"")},
     )
@@ -580,15 +587,17 @@ def parse_checkpoint_status_board(path: Path, root: Path | None = None) -> dict[
     blocker = _parse_status_field(lines, "Current blocker")
     if blocker.lower() in {"none", "n/a", "-"}:
         blocker = ""
-    source = path
+    status_board = path
     if root is not None:
         try:
-            source = path.relative_to(root)
+            status_board = path.relative_to(root)
         except ValueError:
             pass
     verification = verification_rows[-1] if verification_rows else {}
     return {
-        "source": source.as_posix() if isinstance(source, Path) else str(source),
+        "source": "custom-workflow",
+        "is_durable": False,
+        "status_board": status_board.as_posix() if isinstance(status_board, Path) else str(status_board),
         "state": _parse_status_field(lines, "State").lower(),
         "progress": _parse_progress(_parse_status_field(lines, "Progress")),
         "current": current,
@@ -635,7 +644,7 @@ def _status_board_candidates(root: Path, item: Phase) -> list[Path]:
 
 
 def checkpoint_sync_usage() -> str:
-    return "Usage: wily.py checkpoint-sync <phase-id> [--status-board path]"
+    return "Usage: wily.py checkpoint-sync <stage-id>/<phase-id> [--status-board path]"
 
 
 def command_checkpoint_sync(root: Path, args: list[str]) -> int:
@@ -1065,16 +1074,58 @@ def save_stage_state(root: Path, stage: Stage, stage_state: dict[str, Any]) -> N
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     phases = stage_state.get("phases") or []
-    path.write_text(serialize_stage_state(stage, phases), encoding="utf-8")
+    if stage_state.get("schema") == "wily-roadmap-v2":
+        path.write_text(serialize_v2_stage_state(stage, phases), encoding="utf-8")
+    else:
+        path.write_text(serialize_stage_state(stage, phases), encoding="utf-8")
 
 
 def find_stage_phase(root: Path, roadmap: dict[str, Any], phase_id: str) -> tuple[Stage, Phase, dict[str, Any]] | None:
+    requested_stage_id: str | None = None
+    requested_phase_id = phase_id
+    if "/" in phase_id:
+        requested_stage_id, requested_phase_id = phase_id.split("/", 1)
     for stage in roadmap.get("stages") or []:
+        if requested_stage_id is not None and str(stage.get("id")) != requested_stage_id:
+            continue
         stage_state = load_stage_state(root, stage)
         for phase in stage_state.get("phases") or []:
-            if str(phase.get("id")) == phase_id:
+            if str(phase.get("id")) == requested_phase_id:
                 return stage, phase, stage_state
     return None
+
+
+def is_v2_roadmap(roadmap: dict[str, Any]) -> bool:
+    return wily_state_summary.is_v2_roadmap(roadmap)
+
+
+def next_ready_phase_ref(root: Path, roadmap: dict[str, Any], stage_id: str | None = None) -> str | None:
+    stages = wily_state_summary.enrich_stages_with_local_state(root, roadmap.get("stages") or [])
+    stages = wily_state_summary.normalize_v2_stage_statuses(stages)
+    if stage_id:
+        stages = [stage for stage in stages if str(stage.get("id")) == stage_id]
+    candidate = wily_state_summary.next_executable_child_phase(stages)
+    if not candidate:
+        return None
+    stage, phase = candidate
+    return wily_state_summary.canonical_phase_ref(stage, phase)
+
+
+def reject_v2_stage_execution(root: Path, roadmap: dict[str, Any], stage: Stage) -> int:
+    stage_id = str(stage.get("id", "unknown"))
+    print(f"Stage is not executable: {stage_id}", file=sys.stderr)
+    next_ref = next_ready_phase_ref(root, roadmap, stage_id) or next_ready_phase_ref(root, roadmap)
+    if next_ref:
+        print(f"Next phase: {next_ref}", file=sys.stderr)
+    else:
+        print(f"Run: wily decompose-stage {stage_id} or wily migrate-state --to wily-roadmap-v2 --dry-run", file=sys.stderr)
+    return 1
+
+
+def stage_phase_display_id(roadmap: dict[str, Any], requested_id: str, stage: Stage, phase: Phase) -> str:
+    if is_v2_roadmap(roadmap) or "/" in requested_id:
+        return wily_state_summary.canonical_phase_ref(stage, phase)
+    return str(phase.get("id", requested_id))
 
 
 def stage_child_phases_done(stage_state: dict[str, Any]) -> bool:
@@ -1111,7 +1162,17 @@ def command_next(root: Path) -> int:
     roadmap = load_roadmap(root)
     stages = roadmap.get("stages") or []
     enriched_stages = wily_state_summary.enrich_stages_with_local_state(root, stages) if stages else []
-    ready_stages = wily_state_summary.executable_stages(enriched_stages)
+    v2 = is_v2_roadmap(roadmap)
+    stage_candidates = (
+        wily_state_summary.normalize_v2_stage_statuses(enriched_stages)
+        if v2
+        else enriched_stages
+    )
+    ready_stages = (
+        wily_state_summary.executable_v2_stages(stage_candidates)
+        if v2
+        else wily_state_summary.executable_stages(stage_candidates)
+    )
     stage = ready_stages[0] if ready_stages else None
     if stage:
         if len(ready_stages) > 1:
@@ -1141,13 +1202,21 @@ def command_next(root: Path) -> int:
             return 0
         folder = state_dir(root) / str(stage_path)
         print(f"Stage path: {folder}")
-        if stage.get("execution_mode") == "decomposed":
+        if v2 or stage.get("execution_mode") == "decomposed":
             child_phases = stage.get("phases") or []
             if child_phases:
-                ready_children = wily_state_summary.executable_phases(child_phases)
+                ready_children = (
+                    wily_state_summary.executable_child_phases(stage, stage_candidates)
+                    if v2
+                    else wily_state_summary.executable_phases(child_phases)
+                )
                 next_child = ready_children[0] if ready_children else None
                 if next_child:
-                    child_id = next_child.get("id", "unknown")
+                    child_id = (
+                        wily_state_summary.canonical_phase_ref(stage, next_child)
+                        if v2
+                        else next_child.get("id", "unknown")
+                    )
                     child_title = next_child.get("title", "Untitled phase")
                     print(f"Next phase: {child_id} - {child_title}")
                     child_path = next_child.get("path")
@@ -1315,6 +1384,15 @@ def serialize_stage_state(stage: Stage, phases: list[Phase]) -> str:
         "stage_id": str(stage.get("id", "unknown")),
         "execution_mode": "decomposed",
         "decomposition_status": "applied",
+        "phases": phases,
+    }
+    return serialize_roadmap(data)
+
+
+def serialize_v2_stage_state(stage: Stage, phases: list[Phase]) -> str:
+    data: dict[str, Any] = {
+        "stage_id": str(stage.get("id", "unknown")),
+        "schema": "wily-roadmap-v2",
         "phases": phases,
     }
     return serialize_roadmap(data)
@@ -1795,7 +1873,7 @@ def snapshot_runner_session(root: Path, phase: Phase, recommended_status: str) -
 def require_phase_id(args: list[str], command: str) -> str | None:
     if args:
         return args[0]
-    print(f"Usage: wily.py {command} <phase-id>", file=sys.stderr)
+    print(f"Usage: wily.py {command} <stage-id>/<phase-id>", file=sys.stderr)
     return None
 
 
@@ -1809,9 +1887,10 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
         found = find_stage_phase(root, roadmap, phase_id)
         if found:
             stage, phase, stage_state = found
-            warn_board_live_claims({**phase, "stage_id": stage.get("id", "")})
-            attempt = next_attempt(root, phase_id)
-            session = create_session(root, phase, attempt)
+            display_id = stage_phase_display_id(roadmap, phase_id, stage, phase)
+            warn_board_live_claims({**phase, "id": display_id, "stage_id": stage.get("id", "")})
+            attempt = next_attempt(root, display_id)
+            session = create_session(root, {**phase, "id": display_id}, attempt)
             phase["status"] = "in_progress"
             phase["current_session"] = relative_session_path(root, session)
             stage["status"] = "in_progress"
@@ -1820,7 +1899,7 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
             save_stage_state(root, stage, stage_state)
             save_roadmap(root, roadmap)
             live_payload = open_live_session(root, {**phase, "stage_id": stage.get("id", "")})
-            event_payload = {**phase, **live_payload, "id": phase.get("id", phase_id), "stage_id": stage.get("id", "")}
+            event_payload = {**phase, **live_payload, "id": display_id, "stage_id": stage.get("id", "")}
             if board_live_enabled(root):
                 _surface_emit_failure(
                     "start",
@@ -1834,15 +1913,17 @@ def command_start(root: Path, args: list[str], *, retry: bool = False) -> int:
             if heartbeat_enabled(root):
                 spawn_heartbeat_sidecar(root, event_payload, str(live_payload["session_id"]))
             if retry:
-                print(f"Started phase {phase_id} attempt {attempt}")
+                print(f"Started phase {display_id} attempt {attempt}")
             else:
-                print(f"Started phase {phase_id}")
+                print(f"Started phase {display_id}")
             print(f"Session: {session}")
             return 0
         stage = find_stage(roadmap, phase_id)
         if not stage:
             print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
             return 1
+        if is_v2_roadmap(roadmap):
+            return reject_v2_stage_execution(root, roadmap, stage)
         warn_board_live_claims(stage)
         attempt = next_stage_attempt(root, phase_id)
         session = create_stage_session(root, stage, attempt)
@@ -1912,25 +1993,28 @@ def command_complete(root: Path, args: list[str]) -> int:
         found = find_stage_phase(root, roadmap, phase_id)
         if found:
             stage, phase, stage_state = found
+            display_id = stage_phase_display_id(roadmap, phase_id, stage, phase)
             phase["status"] = "done"
             phase.pop("blocker", None)
             if stage_child_phases_done(stage_state):
                 stage["status"] = "done"
-            update_session_status(root, phase, "verified")
+            update_session_status(root, {**phase, "id": display_id}, "verified")
             save_stage_state(root, stage, stage_state)
             save_roadmap(root, roadmap)
             close_live_sessions(
                 root,
-                {**phase, "stage_id": stage.get("id", "")},
+                {**phase, "id": display_id, "stage_id": stage.get("id", "")},
                 event="complete",
                 live_status="completed_local",
             )
-            print(f"Completed phase {phase_id}")
+            print(f"Completed phase {display_id}")
             return 0
         stage = find_stage(roadmap, phase_id)
         if not stage:
             print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
             return 1
+        if is_v2_roadmap(roadmap):
+            return reject_v2_stage_execution(root, roadmap, stage)
         stage["status"] = "done"
         stage.pop("blocker", None)
         update_session_status(root, stage, "verified")
@@ -1959,26 +2043,29 @@ def command_block(root: Path, args: list[str]) -> int:
         found = find_stage_phase(root, roadmap, phase_id)
         if found:
             stage, phase, stage_state = found
+            display_id = stage_phase_display_id(roadmap, phase_id, stage, phase)
             phase["status"] = "blocked"
             phase["blocker"] = reason
             stage["status"] = "blocked"
             stage["blocker"] = reason
-            update_session_status(root, phase, "blocked", reason)
+            update_session_status(root, {**phase, "id": display_id}, "blocked", reason)
             save_stage_state(root, stage, stage_state)
             save_roadmap(root, roadmap)
             close_live_sessions(
                 root,
-                {**phase, "stage_id": stage.get("id", "")},
+                {**phase, "id": display_id, "stage_id": stage.get("id", "")},
                 event="block",
                 live_status="blocked_local",
                 note=reason,
             )
-            print(f"Blocked phase {phase_id}: {reason}")
+            print(f"Blocked phase {display_id}: {reason}")
             return 0
         stage = find_stage(roadmap, phase_id)
         if not stage:
             print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
             return 1
+        if is_v2_roadmap(roadmap):
+            return reject_v2_stage_execution(root, roadmap, stage)
         stage["status"] = "blocked"
         stage["blocker"] = reason
         update_session_status(root, stage, "blocked", reason)
@@ -1998,7 +2085,7 @@ def command_block(root: Path, args: list[str]) -> int:
 
 def heartbeat_usage() -> str:
     return (
-        "Usage: wily.py live-heartbeat <phase-id> [--interval seconds] [--count n] "
+        "Usage: wily.py live-heartbeat <stage-id>/<phase-id> [--interval seconds] [--count n] "
         "[--note text] [--session id] [--parent-shell-pid pid] [--ttl seconds] [--foreground]"
     )
 
@@ -2155,7 +2242,10 @@ def command_live_heartbeat(root: Path, args: list[str]) -> int:
 
 
 def live_worked_usage() -> str:
-    return "Usage: wily.py live-worked [item-id] [--session id] [--agent name] [--tool name] [--summary text] [--from-hook]"
+    return (
+        "Usage: wily.py live-worked [<stage-id>/<phase-id>|item-id] [--session id] "
+        "[--agent name] [--tool name] [--summary text] [--from-hook]"
+    )
 
 
 def command_live_worked(root: Path, args: list[str]) -> int:
@@ -2666,6 +2756,302 @@ def warn_stage_decomposition_board_recovery(stage_id: str) -> None:
         "actual-site verification remains incomplete.",
         file=sys.stderr,
     )
+
+
+def command_migrate_state_usage() -> str:
+    return "Usage: wily.py migrate-state --to wily-roadmap-v2 (--dry-run|--apply|--prune-legacy)"
+
+
+def migration_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def migration_backup_path(root: Path, stamp: str) -> Path:
+    return state_dir(root) / "backups" / f"{stamp}-wily-roadmap-v2"
+
+
+def migration_report_paths(root: Path, stamp: str) -> tuple[Path, Path]:
+    base = state_dir(root) / "migrations" / f"{stamp}-wily-roadmap-v2"
+    return base.with_suffix(".md"), base.with_suffix(".json")
+
+
+def copy_migration_backup(root: Path, backup: Path) -> None:
+    backup.mkdir(parents=True, exist_ok=True)
+    state = state_dir(root)
+    for name in ("roadmap.yaml", "project.md", "status.md", "decisions.md"):
+        source = state / name
+        if source.exists():
+            shutil.copy2(source, backup / name)
+    for name in ("stages", "phases", "sessions", "revisions"):
+        source = state / name
+        if source.exists():
+            shutil.copytree(source, backup / name, dirs_exist_ok=True)
+
+
+def stage_slug(stage_id: str, title: str) -> str:
+    title_slug = slugify_title(title)
+    if title_slug.startswith(stage_id):
+        return title_slug
+    return f"{stage_id}-{title_slug}"
+
+
+def default_stage_path(stage_id: str, title: str) -> str:
+    return f"stages/{stage_slug(stage_id, title)}"
+
+
+def migration_stage_for_phase(index: int, phase: Phase) -> Stage:
+    stage_id = f"s{index:02d}"
+    title = str(phase.get("title") or f"Stage {index:02d}")
+    return {
+        "id": stage_id,
+        "title": title,
+        "path": default_stage_path(stage_id, title),
+        "status": phase.get("status", "pending"),
+        "depends_on": [],
+        "owner": phase.get("owner") or phase.get("lead") or "codex",
+    }
+
+
+def phase_dependency_refs(stage: Stage, phase: Phase, legacy_phase_mappings: dict[str, str]) -> list[str]:
+    refs: list[str] = []
+    for dependency in phase.get("depends_on") or []:
+        value = str(dependency)
+        if value in legacy_phase_mappings:
+            refs.append(legacy_phase_mappings[value])
+        elif "/" in value:
+            refs.append(value)
+        elif value.startswith("s"):
+            refs.append(value)
+        else:
+            refs.append(f"{stage.get('id')}/{value}")
+    return refs
+
+
+def migration_transform(root: Path, roadmap: dict[str, Any]) -> dict[str, Any]:
+    legacy_phases = [dict(phase) for phase in roadmap.get("phases") or [] if isinstance(phase, dict)]
+    original_stages = [dict(stage) for stage in roadmap.get("stages") or [] if isinstance(stage, dict)]
+    warnings: list[str] = []
+    changed_files = [".wily/roadmap.yaml"]
+    legacy_phase_mappings: dict[str, str] = {}
+
+    if not original_stages and legacy_phases:
+        phase_to_stage: dict[str, str] = {}
+        generated: list[Stage] = []
+        for index, phase in enumerate(legacy_phases, start=1):
+            stage = migration_stage_for_phase(index, phase)
+            generated.append(stage)
+            phase_to_stage[str(phase.get("id"))] = str(stage["id"])
+            phase["stage_id"] = stage["id"]
+        for stage, phase in zip(generated, legacy_phases, strict=False):
+            stage["depends_on"] = [
+                phase_to_stage[str(dependency)]
+                for dependency in phase.get("depends_on") or []
+                if str(dependency) in phase_to_stage
+            ]
+        original_stages = generated
+
+    stages = original_stages
+    stages_by_id = {str(stage.get("id")): stage for stage in stages if stage.get("id")}
+    grouped_legacy: dict[str, list[tuple[Phase, str]]] = {str(stage.get("id")): [] for stage in stages}
+
+    for phase in legacy_phases:
+        old_id = str(phase.get("id"))
+        stage_id = str(phase.get("stage_id") or "")
+        if not stage_id or stage_id not in stages_by_id:
+            if len(stages) == 1:
+                stage_id = str(stages[0].get("id"))
+            else:
+                warnings.append(f"Legacy phase {old_id} has no valid stage_id; skipped.")
+                continue
+        new_id = f"p{len(grouped_legacy.setdefault(stage_id, [])) + 1:02d}"
+        grouped_legacy[stage_id].append((phase, new_id))
+        legacy_phase_mappings[old_id] = f"{stage_id}/{new_id}"
+
+    stage_phase_map: dict[str, list[Phase]] = {}
+    for stage in stages:
+        stage_id = str(stage.get("id"))
+        phase_rows: list[Phase] = []
+        stage_state = load_stage_state(root, stage)
+        existing = [dict(phase) for phase in stage_state.get("phases") or [] if isinstance(phase, dict)]
+        if existing:
+            for phase in existing:
+                phase.setdefault("runner", "custom-workflow")
+                phase.setdefault(
+                    "path",
+                    f"{stage.get('path')}/phases/{phase.get('id')}-{slugify_title(str(phase.get('title', phase.get('id'))))}",
+                )
+                phase_rows.append(phase)
+        for legacy_phase, new_id in grouped_legacy.get(stage_id, []):
+            title = str(legacy_phase.get("title") or stage.get("title") or new_id)
+            migrated = {
+                "id": new_id,
+                "title": title,
+                "status": legacy_phase.get("status", "pending"),
+                "depends_on": phase_dependency_refs(stage, legacy_phase, legacy_phase_mappings),
+                "owner": legacy_phase.get("owner") or legacy_phase.get("lead") or stage.get("owner") or "codex",
+                "runner": legacy_phase.get("runner") or "custom-workflow",
+                "path": f"{stage.get('path')}/phases/{new_id}-{slugify_title(title)}",
+            }
+            for key in ("current_session", "summary", "blocker", "verification"):
+                if key in legacy_phase:
+                    migrated[key] = legacy_phase[key]
+            phase_rows.append(migrated)
+        if not phase_rows and stage.get("status") != "superseded":
+            title = str(stage.get("title") or f"{stage_id} implementation")
+            phase_rows.append(
+                {
+                    "id": "p01",
+                    "title": title,
+                    "status": stage.get("status", "pending"),
+                    "depends_on": [],
+                    "owner": stage.get("owner") or "codex",
+                    "runner": "custom-workflow",
+                    "path": f"{stage.get('path')}/phases/p01-{slugify_title(title)}",
+                }
+            )
+        stage_phase_map[stage_id] = phase_rows
+        changed_files.append(f".wily/{stage.get('path')}/stage.yaml")
+
+    normalized_for_status: list[Stage] = []
+    for stage in stages:
+        copy = dict(stage)
+        copy["phases"] = stage_phase_map.get(str(stage.get("id")), [])
+        normalized_for_status.append(copy)
+    normalized_for_status = wily_state_summary.normalize_v2_stage_statuses(normalized_for_status)
+    status_by_id = {str(stage.get("id")): stage.get("status") for stage in normalized_for_status}
+
+    migrated_stages: list[Stage] = []
+    for stage in stages:
+        copy = {key: value for key, value in stage.items() if key != "phases"}
+        copy.setdefault("path", default_stage_path(str(copy.get("id")), str(copy.get("title", "Stage"))))
+        copy["status"] = status_by_id.get(str(copy.get("id")), copy.get("status", "pending"))
+        migrated_stages.append(copy)
+
+    migrated_roadmap = {
+        key: value
+        for key, value in roadmap.items()
+        if key not in {"phases", "stages", "roadmap_version", "roadmap_schema"}
+    }
+    migrated_roadmap["roadmap_schema"] = "wily-roadmap-v2"
+    migrated_roadmap["stages"] = migrated_stages
+
+    return {
+        "roadmap": migrated_roadmap,
+        "stage_phase_map": stage_phase_map,
+        "phase_mappings": legacy_phase_mappings,
+        "changed_files": changed_files,
+        "warnings": warnings,
+    }
+
+
+def write_migration_reports(
+    root: Path,
+    stamp: str,
+    mode: str,
+    transform: dict[str, Any],
+    backup: Path | None,
+) -> tuple[Path, Path]:
+    report_md, report_json = migration_report_paths(root, stamp)
+    report_md.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "mode": mode,
+        "target_schema": "wily-roadmap-v2",
+        "created_at": utc_now_z(),
+        "backup": str(backup.relative_to(root)) if backup else "",
+        "changed_files": transform["changed_files"],
+        "phase_mappings": transform["phase_mappings"],
+        "warnings": transform["warnings"],
+    }
+    report_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lines = [
+        "# Wily Roadmap v2 Migration Report",
+        "",
+        f"- Mode: {mode}",
+        "- Target schema: wily-roadmap-v2",
+        f"- Backup: {payload['backup'] or 'none'}",
+        "",
+        "## Changed Files",
+        *[f"- {path}" for path in transform["changed_files"]],
+        "",
+        "## Phase Mappings",
+        *[f"- {old} -> {new}" for old, new in sorted(transform["phase_mappings"].items())],
+        *(["- none"] if not transform["phase_mappings"] else []),
+        "",
+        "## Warnings",
+        *[f"- {warning}" for warning in transform["warnings"]],
+        *(["- none"] if not transform["warnings"] else []),
+        "",
+    ]
+    report_md.write_text("\n".join(lines), encoding="utf-8")
+    return report_md, report_json
+
+
+def write_migrated_v2_state(root: Path, transform: dict[str, Any]) -> None:
+    save_roadmap(root, transform["roadmap"])
+    stages_by_id = {str(stage.get("id")): stage for stage in transform["roadmap"].get("stages") or []}
+    for stage_id, phases in transform["stage_phase_map"].items():
+        stage = stages_by_id.get(stage_id)
+        if not stage:
+            continue
+        path = stage_state_path(root, stage)
+        if not path:
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(serialize_v2_stage_state(stage, phases), encoding="utf-8")
+
+
+def command_migrate_state(root: Path, args: list[str]) -> int:
+    if "--to" not in args:
+        print(command_migrate_state_usage(), file=sys.stderr)
+        return 2
+    target_index = args.index("--to")
+    if target_index + 1 >= len(args) or args[target_index + 1] != "wily-roadmap-v2":
+        print("Only --to wily-roadmap-v2 is supported.", file=sys.stderr)
+        return 2
+    modes = [flag for flag in ("--dry-run", "--apply", "--prune-legacy") if flag in args]
+    if len(modes) != 1:
+        print(command_migrate_state_usage(), file=sys.stderr)
+        return 2
+    mode = modes[0].lstrip("-")
+    roadmap = load_roadmap(root)
+    transform = migration_transform(root, roadmap)
+    stamp = migration_stamp()
+    backup = migration_backup_path(root, stamp)
+    report_md, report_json = migration_report_paths(root, stamp)
+
+    print(f"Migration mode: {mode}")
+    print("Target schema: wily-roadmap-v2")
+    for old, new in sorted(transform["phase_mappings"].items()):
+        print(f"- {new} <- {old}")
+    if transform["warnings"]:
+        print("Warnings:")
+        for warning in transform["warnings"]:
+            print(f"- {warning}")
+
+    if mode == "dry-run":
+        print(f"Would write backup: {backup.relative_to(root)}")
+        print(f"Would write reports: {report_md.relative_to(root)}, {report_json.relative_to(root)}")
+        for path in transform["changed_files"]:
+            print(f"Would change: {path}")
+        return 0
+
+    if mode == "prune-legacy":
+        legacy = state_dir(root) / "phases"
+        if not legacy.exists():
+            print("No legacy .wily/phases directory to prune.")
+            return 0
+        shutil.rmtree(legacy)
+        print("Pruned legacy .wily/phases directory.")
+        return 0
+
+    copy_migration_backup(root, backup)
+    write_migrated_v2_state(root, transform)
+    written_md, written_json = write_migration_reports(root, stamp, mode, transform, backup)
+    print(f"Backup: {backup.relative_to(root)}")
+    print(f"Report: {written_md.relative_to(root)}")
+    print(f"Report: {written_json.relative_to(root)}")
+    print("Migration applied.")
+    return 0
 
 
 def emit_stage_decomposition_live_draft(
@@ -3179,6 +3565,214 @@ def command_run(root: Path, args: list[str]) -> int:
     return wily_runner.command_run(root, args)
 
 
+def command_land_usage() -> str:
+    return "Usage: wily.py land <stage-id>/<phase-id> [--base branch] [--message text] [--direct|--pr]"
+
+
+def resolve_land_item(root: Path, roadmap: dict[str, Any], phase_id: str) -> tuple[str, Phase] | None:
+    phase = find_phase(roadmap, phase_id)
+    if phase:
+        return phase_id, phase
+    found = find_stage_phase(root, roadmap, phase_id)
+    if found:
+        stage, phase, _stage_state = found
+        return stage_phase_display_id(roadmap, phase_id, stage, phase), {
+            **phase,
+            "id": stage_phase_display_id(roadmap, phase_id, stage, phase),
+            "stage_id": stage.get("id", ""),
+        }
+    stage = find_stage(roadmap, phase_id)
+    if stage and not is_v2_roadmap(roadmap):
+        return phase_id, stage
+    return None
+
+
+def git_step(root: Path, args: list[str], label: str) -> subprocess.CompletedProcess[str]:
+    result = git_run(root, args)
+    if result.returncode != 0:
+        print(f"{label} failed: {format_shell_command(['git', *args])}", file=sys.stderr)
+        if result.stderr.strip():
+            print(result.stderr.strip(), file=sys.stderr)
+        elif result.stdout.strip():
+            print(result.stdout.strip(), file=sys.stderr)
+    return result
+
+
+def cleanup_land_artifacts(root: Path, item: Phase) -> int:
+    removed = 0
+    wanted = {
+        str(item.get("id", "")),
+        str(item.get("phase_id", "")),
+        str(item.get("stage_id", "")),
+    }
+    wanted.discard("")
+    for path in active_live_registry_files(root):
+        payload = read_live_registry(path)
+        if not payload:
+            continue
+        values = {
+            str(payload.get("id", "")),
+            str(payload.get("item_id", "")),
+            str(payload.get("phase_id", "")),
+            str(payload.get("stage_id", "")),
+        }
+        if wanted & values:
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+def command_land(root: Path, args: list[str]) -> int:
+    if not args:
+        print(command_land_usage(), file=sys.stderr)
+        return 2
+    phase_id = args[0]
+    base = "main"
+    message = ""
+    mode = "direct"
+    index = 1
+    while index < len(args):
+        arg = args[index]
+        if arg == "--base":
+            if index + 1 >= len(args):
+                print("Missing value for --base", file=sys.stderr)
+                return 2
+            base = args[index + 1]
+            index += 2
+            continue
+        if arg == "--message":
+            if index + 1 >= len(args):
+                print("Missing value for --message", file=sys.stderr)
+                return 2
+            message = args[index + 1]
+            index += 2
+            continue
+        if arg == "--direct":
+            mode = "direct"
+            index += 1
+            continue
+        if arg == "--pr":
+            mode = "pr"
+            index += 1
+            continue
+        print(f"Unknown land option: {arg}", file=sys.stderr)
+        print(command_land_usage(), file=sys.stderr)
+        return 2
+
+    roadmap = load_roadmap(root)
+    resolved = resolve_land_item(root, roadmap, phase_id)
+    if not resolved:
+        print(f"Phase or stage not found: {phase_id}", file=sys.stderr)
+        return 1
+    display_id, item = resolved
+    if item.get("status") != "done":
+        print(f"Phase is not done: {display_id}", file=sys.stderr)
+        return 1
+
+    git_root = git_install_root(root)
+    if not git_root:
+        print("Cannot land outside a git repository.", file=sys.stderr)
+        return 1
+    branch = current_git_branch(git_root)
+    if not branch:
+        print("Cannot land while HEAD is detached.", file=sys.stderr)
+        return 1
+    if not git_stdout(git_root, ["config", "--get", "remote.origin.url"]):
+        print("No origin remote configured.", file=sys.stderr)
+        return 1
+    if not message:
+        title = str(item.get("title") or "Wily phase")
+        message = f"land {display_id}: {title}"
+
+    add = git_step(git_root, ["add", "-A"], "Stage changes")
+    if add.returncode != 0:
+        return add.returncode
+
+    status = git_run(git_root, ["status", "--porcelain"])
+    if status.returncode != 0:
+        print("Unable to read git status.", file=sys.stderr)
+        if status.stderr.strip():
+            print(status.stderr.strip(), file=sys.stderr)
+        return status.returncode
+    if status.stdout.strip():
+        commit = git_step(git_root, ["commit", "-m", message], "Commit")
+        if commit.returncode != 0:
+            return commit.returncode
+        print(f"Committed: {git_commit(git_root, 'HEAD') or 'unknown'}")
+    else:
+        print("No local changes to commit.")
+
+    push_branch = git_step(git_root, ["push", "-u", "origin", branch], "Push branch")
+    if push_branch.returncode != 0:
+        return push_branch.returncode
+    print(f"Pushed branch: {branch}")
+
+    if mode == "pr":
+        if shutil.which("gh") is None:
+            print("Cannot create PR because gh is not installed.", file=sys.stderr)
+            return 1
+        pr = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--base",
+                base,
+                "--head",
+                branch,
+                "--title",
+                message,
+                "--body",
+                f"Lands Wily phase {display_id}.",
+            ],
+            cwd=git_root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if pr.returncode != 0:
+            print("PR creation failed.", file=sys.stderr)
+            if pr.stderr.strip():
+                print(pr.stderr.strip(), file=sys.stderr)
+            return pr.returncode
+        if pr.stdout.strip():
+            print(pr.stdout.strip())
+        checkout = git_step(git_root, ["checkout", base], "Checkout base")
+        if checkout.returncode != 0:
+            return checkout.returncode
+        pull = git_step(git_root, ["pull", "--ff-only", "origin", base], "Pull base")
+        if pull.returncode != 0:
+            return pull.returncode
+        cleaned = cleanup_land_artifacts(root, item)
+        print(f"Checked out {base}")
+        if cleaned:
+            print(f"Cleaned local live artifacts: {cleaned}")
+        return 0
+
+    checkout = git_step(git_root, ["checkout", base], "Checkout base")
+    if checkout.returncode != 0:
+        return checkout.returncode
+    pull = git_step(git_root, ["pull", "--ff-only", "origin", base], "Pull base")
+    if pull.returncode != 0:
+        return pull.returncode
+    merge = git_step(git_root, ["merge", "--ff-only", branch], "Fast-forward merge")
+    if merge.returncode != 0:
+        return merge.returncode
+    push_base = git_step(git_root, ["push", "origin", base], "Push base")
+    if push_base.returncode != 0:
+        return push_base.returncode
+    cleaned = cleanup_land_artifacts(root, item)
+    print(f"Landed on {base}")
+    print(f"Pushed base: {base}")
+    if cleaned:
+        print(f"Cleaned local live artifacts: {cleaned}")
+    return 0
+
+
 def update_repository_url() -> str:
     return os.environ.get("WILY_UPDATE_REPOSITORY_URL", DEFAULT_UPDATE_REPOSITORY)
 
@@ -3385,22 +3979,24 @@ def usage() -> str:
             "  init [goal]",
             "  status",
             "  next",
-            "  start <phase-id>",
-            "  complete <phase-id>",
-            "  block <phase-id> [reason]",
-            "  release <phase-id>",
-            "  live-heartbeat <phase-id> [--interval seconds] [--count n] [--note text]",
-            "  live-worked [item-id] [--session id] [--agent name] [--from-hook]",
-            "  checkpoint-sync <phase-id> [--status-board path]",
+            "  start <stage-id>/<phase-id>",
+            "  complete <stage-id>/<phase-id>",
+            "  block <stage-id>/<phase-id> [reason]",
+            "  release <stage-id>/<phase-id>",
+            "  live-heartbeat <stage-id>/<phase-id> [--interval seconds] [--count n] [--note text]",
+            "  live-worked [<stage-id>/<phase-id>|item-id] [--session id] [--agent name] [--from-hook]",
+            "  checkpoint-sync <stage-id>/<phase-id> [--status-board path]",
             "  board check [--hooks-path file] [--probe]",
             "  board sync-local <stage-id>",
             "  hooks install --target codex|claude",
             "  codex-bridge --session id [--fixture jsonl]",
-            "  retry <phase-id>",
+            "  retry <stage-id>/<phase-id>",
             "  replan [reason]",
             "  issues [--add-to-roadmap]",
             "  decompose-stage <stage-id> [--dry-run|--from-json <path>|--apply-fixture]",
-            "  run <phase-id> [--runner <id>] [--autonomy <mode>]",
+            "  migrate-state --to wily-roadmap-v2 (--dry-run|--apply|--prune-legacy)",
+            "  run <stage-id>/<phase-id> [--runner <id>] [--autonomy <mode>] [--dry-run]",
+            "  land <stage-id>/<phase-id> [--base branch] [--direct|--pr]",
             "  update [--check|--migrate|--yes]",
             "  watch",
         ]
@@ -3449,8 +4045,12 @@ def main(argv: list[str] | None = None) -> int:
         return command_issues(root, args)
     if command == "decompose-stage":
         return command_decompose_stage(root, args)
+    if command == "migrate-state":
+        return command_migrate_state(root, args)
     if command == "run":
         return command_run(root, args)
+    if command == "land":
+        return command_land(root, args)
     if command == "update":
         return command_update(root, args)
     if command == "watch":

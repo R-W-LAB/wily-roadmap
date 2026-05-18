@@ -33,13 +33,16 @@ Custom Workflow owns phase implementation planning, progress tracking, bounded l
 
 Custom Workflow may publish an `agent-handoffs/*-status.md` status board while a Wily Phase is still running. Wily treats that board as a provisional runner overlay, not durable roadmap state.
 
-`wily.py checkpoint-sync <phase-id> --status-board <path>` reads the status board and attaches a `checkpoint` payload to the selected Phase's local live registry. When Wily Board live config is available, the same payload is signed and sent as a `checkpoint_updated` event to `/api/live/events`.
+`wily.py checkpoint-sync <stage-id>/<phase-id> --status-board <path>` reads the status board and attaches a non-durable `checkpoint` payload to the selected Phase's local live registry. When Wily Board live config is available, the same `(stage_id, phase_id)` payload is signed and sent as a `checkpoint_updated` event to `/api/live/events`.
 
 This is part of the Board reflection contract in `references/board-reflection-contract.md`. `$wily-run` and Custom Workflow runners should call `checkpoint-sync` or an equivalent helper path after checkpoint/status-board changes when Board live config is available, then record deterministic evidence from the emit result, API, SSE, or SSR HTML. The actual-site visual verification escalation is reserved for deterministic failures, mismatches, explicit visual requests, or Board UI/rendering changes.
 
 Checkpoint payload shape:
 
 - `state`: runner state from the status board.
+- `source`: `custom-workflow`.
+- `status_board`: the status-board artifact path.
+- `is_durable`: `false`.
 - `progress`: `{done, total, percent}`.
 - `current`: current checkpoint `{id, title, status, owner, evidence}`.
 - `next`: next checkpoint with the same shape when present.

@@ -1,6 +1,5 @@
 stage_id: "s07"
-execution_mode: "decomposed"
-decomposition_status: "applied"
+schema: "wily-roadmap-v2"
 phases:
   - id: "07-1"
     title: "GitHub Issues 선택적 연동 계약 정의"
@@ -9,3 +8,4 @@ phases:
     depends_on: []
     parallel_group: "07"
     current_session: "sessions/2026-05-13-095737-phase-07-1-attempt-1"
+    runner: "custom-workflow"

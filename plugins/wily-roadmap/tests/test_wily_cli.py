@@ -89,6 +89,13 @@ class WatchInputTest(unittest.TestCase):
         self.assertEqual(wily.watch_action_from_input("\x1b[<65;12;4M", expand_done=True), "scroll_down")
         self.assertIsNone(wily.watch_action_from_input("\x1b[<64;12;4M", expand_done=False))
 
+
+class UsageContractTest(unittest.TestCase):
+    def test_live_usage_prefers_v2_canonical_phase_refs(self) -> None:
+        self.assertIn("<stage-id>/<phase-id>", wily.heartbeat_usage())
+        self.assertIn("[<stage-id>/<phase-id>|item-id]", wily.live_worked_usage())
+        self.assertIn("live-worked [<stage-id>/<phase-id>|item-id]", wily.usage())
+
     def test_parse_sgr_mouse_event_includes_button_code(self) -> None:
         self.assertEqual(wily.parse_watch_mouse_event("\x1b[<0;9;12M"), (0, 9, 12, True))
         self.assertEqual(wily.parse_watch_mouse_event("\x1b[<2;9;12M"), (2, 9, 12, True))
@@ -280,6 +287,30 @@ class WilyCliTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+
+    def assert_git_ok(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def init_git_project_with_origin(self, project: Path, remote: Path) -> None:
+        self.assert_git_ok(project, "init", "-b", "main")
+        self.assert_git_ok(project, "config", "user.email", "wily@example.test")
+        self.assert_git_ok(project, "config", "user.name", "Wily Test")
+        self.assert_git_ok(project.parent, "init", "--bare", str(remote))
+        self.assert_git_ok(project, "add", ".")
+        self.assert_git_ok(project, "commit", "-m", "initial")
+        self.assert_git_ok(project, "remote", "add", "origin", str(remote))
+        self.assert_git_ok(project, "push", "-u", "origin", "main")
 
     def write_pending_unblocked_phase(self, project: Path) -> None:
         self.create_state(project)
@@ -758,6 +789,91 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn('lanes:', stage_text)
             self.assertIn('write_scope: ["src/server"]', stage_text)
             self.assertTrue((project / ".wily" / "stages" / "s01-mvp0" / "phases" / "s01-mvp0-p01" / "phase.md").is_file())
+
+    def test_migrate_state_dry_run_reports_v2_changes_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "mixed-legacy", project)
+            roadmap_path = project / ".wily" / "roadmap.yaml"
+            before = roadmap_path.read_text(encoding="utf-8")
+
+            result = self.run_wily(project, "migrate-state", "--to", "wily-roadmap-v2", "--dry-run")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Migration mode: dry-run", result.stdout)
+            self.assertIn("Target schema: wily-roadmap-v2", result.stdout)
+            self.assertIn("Would write backup:", result.stdout)
+            self.assertIn("Would write reports:", result.stdout)
+            self.assertIn("s02/p01 <- legacy-refactor", result.stdout)
+            self.assertEqual(roadmap_path.read_text(encoding="utf-8"), before)
+            self.assertFalse((project / ".wily" / "backups").exists())
+            self.assertFalse((project / ".wily" / "migrations").exists())
+
+    def test_migrate_state_apply_writes_v2_stage_local_phases_backup_and_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "mixed-legacy", project)
+
+            result = self.run_wily(project, "migrate-state", "--to", "wily-roadmap-v2", "--apply")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Migration mode: apply", result.stdout)
+            self.assertIn("Migration applied.", result.stdout)
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('roadmap_schema: "wily-roadmap-v2"', roadmap)
+            self.assertIn('stages:', roadmap)
+            self.assertNotIn("\nphases:", roadmap)
+            stage_state = (project / ".wily" / "stages" / "s02-refactor" / "stage.yaml").read_text(encoding="utf-8")
+            self.assertIn('schema: "wily-roadmap-v2"', stage_state)
+            self.assertIn('id: "p01"', stage_state)
+            self.assertIn('title: "Legacy refactor"', stage_state)
+            self.assertIn('depends_on: ["s01/p01"]', stage_state)
+            self.assertTrue((project / ".wily" / "phases" / "legacy-refactor").exists())
+            self.assertTrue(any((project / ".wily" / "backups").glob("*-wily-roadmap-v2")))
+            report_json = next((project / ".wily" / "migrations").glob("*-wily-roadmap-v2.json"))
+            report = json.loads(report_json.read_text(encoding="utf-8"))
+            self.assertEqual(report["target_schema"], "wily-roadmap-v2")
+            self.assertEqual(report["phase_mappings"]["legacy-refactor"], "s02/p01")
+            self.assertEqual(report["mode"], "apply")
+
+    def test_v2_start_rejects_stage_id_with_next_phase_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "already-v2", project)
+
+            result = self.run_wily(project, "start", "s02")
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Stage is not executable: s02", result.stderr)
+            self.assertIn("Next phase: s02/p01", result.stderr)
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('status: "ready"', roadmap)
+
+    def test_v2_start_accepts_namespaced_stage_local_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "already-v2", project)
+
+            result = self.run_wily(project, "start", "s02/p01")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Started phase s02/p01", result.stdout)
+            stage_state = (project / ".wily" / "stages" / "s02-refactor" / "stage.yaml").read_text(encoding="utf-8")
+            self.assertIn('status: "in_progress"', stage_state)
+            roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
+            self.assertIn('id: "s02"', roadmap)
+            self.assertIn('status: "in_progress"', roadmap)
+
+    def test_v2_next_reports_next_stage_and_executable_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "already-v2", project)
+            result = self.run_wily(project, "next")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Next stage: s02 - Refactor", result.stdout)
+            self.assertIn("Next phase: s02/p01 - Refactor", result.stdout)
+            self.assertIn("Phase path:", result.stdout)
 
     def test_decompose_stage_from_json_records_user_authored_decomposition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1507,6 +1623,26 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn("custom-workflow-skillset:plan-goal-runner", request_text)
             self.assertIn("custom-workflow-skillset:parallel-lane-runner", request_text)
             self.assertIn("custom-workflow-result.md", request_text)
+            self.assertIn("$wily-complete <stage-id>/<phase-id>", request_text)
+            self.assertIn("$wily-block <stage-id>/<phase-id>", request_text)
+            self.assertNotIn("$wily-complete <phase-id>", request_text)
+            self.assertNotIn("$wily-block <phase-id>", request_text)
+
+    def test_run_dry_run_resolves_v2_stage_local_phase_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "already-v2", project)
+            before = (project / ".wily" / "stages" / "s02-refactor" / "stage.yaml").read_text(encoding="utf-8")
+
+            result = self.run_wily(project, "run", "s02/p01", "--runner", "custom-workflow", "--dry-run")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Dry run: phase s02/p01 is executable", result.stdout)
+            self.assertIn("Workflow engine: custom-workflow-skillset", result.stdout)
+            self.assertIn("custom-workflow-skillset:plan-goal-runner", result.stdout)
+            self.assertEqual((project / ".wily" / "stages" / "s02-refactor" / "stage.yaml").read_text(encoding="utf-8"), before)
+            self.assertFalse((project / ".wily" / "sessions").exists())
+            self.assertFalse((project / "agent-handoffs").exists())
 
     def test_run_keeps_runner_and_autonomy_flags_as_external_workflow_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2989,6 +3125,59 @@ class WilyCliTest(unittest.TestCase):
             self.assertIn('status: "ready"', roadmap)
             self.assertEqual(emitted[0][1:], ("checkpoint_updated", "active", "parsing status board"))
 
+    def test_checkpoint_sync_records_v2_tuple_identity_and_non_durable_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(ROOT / "tests" / "fixtures" / "migration" / "already-v2", project)
+            status_board = project / "status.md"
+            status_board.write_text(
+                "\n".join(
+                    [
+                        "# Goal Status: Demo",
+                        "",
+                        "State: RUNNING",
+                        "Progress: 1 / 2 (50%)",
+                        "Current checkpoint: CP01 - Parser",
+                        "Current action: syncing tuple overlay",
+                        "Next checkpoint: CP02 - Verify",
+                        "Current blocker: none",
+                        "",
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP01 | RUNNING | Parser | root |  |",
+                        "| CP02 | TODO | Verify | root |  |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            emitted: list[tuple[dict, str, str, str]] = []
+
+            def record_event(root: Path, phase: wily.Phase, event: str, live_status: str, note: str = "") -> tuple[bool, str]:
+                emitted.append((phase, event, live_status, note))
+                return True, ""
+
+            env = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/demo",
+                "WILY_BOARD_ACTOR": "airmang",
+            }
+            with patch.dict(os.environ, env, clear=True), patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                result = wily.command_checkpoint_sync(project, ["s02/p01", "--status-board", str(status_board)])
+
+            self.assertEqual(result, 0)
+            payload_path = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            payload = json.loads(payload_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["stage_id"], "s02")
+            self.assertEqual(payload["phase_id"], "p01")
+            self.assertEqual(payload["checkpoint"]["source"], "custom-workflow")
+            self.assertEqual(payload["checkpoint"]["status_board"], "status.md")
+            self.assertFalse(payload["checkpoint"]["is_durable"])
+            self.assertEqual(payload["checkpoint"]["current"]["id"], "CP01")
+            self.assertEqual(emitted[0][0]["stage_id"], "s02")
+            self.assertEqual(emitted[0][0]["phase_id"], "p01")
+            self.assertEqual(emitted[0][1:], ("checkpoint_updated", "active", "syncing tuple overlay"))
+
     def test_live_worked_preserves_checkpoint_context_on_active_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -3365,6 +3554,52 @@ class WilyCliTest(unittest.TestCase):
             roadmap = (project / ".wily" / "roadmap.yaml").read_text(encoding="utf-8")
             self.assertIn('status: "done"', roadmap)
             self.assertNotIn("blocker:", roadmap)
+
+    def test_land_refuses_phase_that_is_not_done(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            project.mkdir()
+            self.write_ready_phase(project)
+            self.init_git_project_with_origin(project, Path(tmp) / "remote.git")
+            self.assert_git_ok(project, "checkout", "-b", "phase-01")
+            (project / "app.txt").write_text("work in progress\n", encoding="utf-8")
+
+            result = self.run_wily(project, "land", "01")
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Phase is not done: 01", result.stderr)
+            self.assertEqual(
+                self.assert_git_ok(project, "branch", "--show-current").stdout.strip(),
+                "phase-01",
+            )
+
+    def test_land_commits_pushes_fast_forward_merges_and_returns_to_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            project.mkdir()
+            self.write_ready_phase(project)
+            self.init_git_project_with_origin(project, Path(tmp) / "remote.git")
+            self.assert_git_ok(project, "checkout", "-b", "phase-01")
+            complete = self.run_wily(project, "complete", "01")
+            self.assertEqual(complete.returncode, 0, complete.stderr)
+            (project / "app.txt").write_text("landed work\n", encoding="utf-8")
+
+            result = self.run_wily(project, "land", "01")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Committed:", result.stdout)
+            self.assertIn("Pushed branch: phase-01", result.stdout)
+            self.assertIn("Landed on main", result.stdout)
+            self.assertIn("Pushed base: main", result.stdout)
+            self.assertEqual(
+                self.assert_git_ok(project, "branch", "--show-current").stdout.strip(),
+                "main",
+            )
+            self.assertEqual((project / "app.txt").read_text(encoding="utf-8"), "landed work\n")
+            self.assertIn(
+                "app.txt",
+                self.assert_git_ok(project, "ls-tree", "--name-only", "origin/main").stdout,
+            )
 
     def test_block_marks_phase_blocked_and_records_reason(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
