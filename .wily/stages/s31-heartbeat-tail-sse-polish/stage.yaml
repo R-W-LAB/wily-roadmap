@@ -4,7 +4,7 @@ phases:
   - id: "31-1"
     title: "Emit renamed event on slug change"
     path: "stages/s31-heartbeat-tail-sse-polish/phases/31-1-renamed-event"
-    status: "pending"
+    status: "done"
     depends_on: []
     parallel_group: "31"
     owner: "codex"
@@ -12,11 +12,12 @@ phases:
     runner: ""
     preferred: "manual"
     autonomy_mode: "goal_scoped"
+    current_session: "sessions/2026-05-18-154833-phase-s31-31-1-attempt-1"
 
   - id: "31-2"
     title: "event_id payload + server dedup"
     path: "stages/s31-heartbeat-tail-sse-polish/phases/31-2-event-id-dedup"
-    status: "pending"
+    status: "done"
     depends_on: []
     parallel_group: "31"
     owner: "codex"
@@ -28,7 +29,7 @@ phases:
   - id: "31-3"
     title: "Dual HMAC secret rotation"
     path: "stages/s31-heartbeat-tail-sse-polish/phases/31-3-secrets-rotation"
-    status: "pending"
+    status: "done"
     depends_on: []
     parallel_group: "31"
     owner: "codex"
@@ -36,11 +37,12 @@ phases:
     runner: ""
     preferred: "manual"
     autonomy_mode: "goal_scoped"
+    current_session: "sessions/2026-05-18-154843-phase-s31-31-3-attempt-1"
 
   - id: "31-4"
     title: "Heartbeat TTL env default + sidecar self-suicide test"
     path: "stages/s31-heartbeat-tail-sse-polish/phases/31-4-ttl-default"
-    status: "pending"
+    status: "done"
     depends_on: []
     parallel_group: "31"
     owner: "codex"
@@ -52,7 +54,7 @@ phases:
   - id: "31-5"
     title: "SSE per-page filter + backoff + tab focus"
     path: "stages/s31-heartbeat-tail-sse-polish/phases/31-5-sse-filter-backoff"
-    status: "pending"
+    status: "done"
     depends_on: []
     parallel_group: "31"
     owner: "codex"
@@ -60,3 +62,4 @@ phases:
     runner: ""
     preferred: "manual"
     autonomy_mode: "goal_scoped"
+    current_session: "sessions/2026-05-18-154854-phase-s31-31-5-attempt-1"

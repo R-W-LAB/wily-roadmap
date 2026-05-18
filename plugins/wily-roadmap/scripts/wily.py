@@ -20,6 +20,7 @@ import tty
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,7 +43,13 @@ WATCH_MOUSE_ENABLE = "\033[?1000h\033[?1006h"
 WATCH_MOUSE_DISABLE = "\033[?1006l\033[?1000l"
 DEFAULT_UPDATE_REPOSITORY = "https://github.com/airmang/wily-roadmap"
 BOARD_LIVE_ENV = ("WILY_BOARD_URL", "WILY_BOARD_SECRET", "WILY_BOARD_REPO", "WILY_BOARD_ACTOR")
-BOARD_LIVE_OPTIONAL_ENV = ("WILY_BOARD_AGENT", "WILY_BOARD_HEARTBEAT", "WILY_BOARD_HEARTBEAT_INTERVAL")
+BOARD_LIVE_OPTIONAL_ENV = (
+    "WILY_BOARD_AGENT",
+    "WILY_BOARD_HEARTBEAT",
+    "WILY_BOARD_HEARTBEAT_INTERVAL",
+    "WILY_BOARD_HEARTBEAT_TTL_SECONDS",
+)
+DEFAULT_HEARTBEAT_TTL_SECONDS = 14400.0
 
 
 def state_dir(root: Path) -> Path:
@@ -66,6 +73,7 @@ def _board_config_file_values(path: Path) -> dict[str, str]:
         "agent": "WILY_BOARD_AGENT",
         "heartbeat": "WILY_BOARD_HEARTBEAT",
         "heartbeat_interval": "WILY_BOARD_HEARTBEAT_INTERVAL",
+        "heartbeat_ttl_seconds": "WILY_BOARD_HEARTBEAT_TTL_SECONDS",
     }
     values: dict[str, str] = {}
     for key, value in payload.items():
@@ -136,6 +144,11 @@ def board_live_signature(secret: str, body: bytes) -> str:
 BoardLiveEventResult = tuple[bool, str]
 
 
+def new_live_event_id() -> str:
+    millis = int(time.time() * 1000)
+    return f"{millis:013x}-{uuid.uuid4().hex}"
+
+
 def board_last_emit_path(root: Path) -> Path:
     return state_dir(root) / "local" / "board-last-emit.json"
 
@@ -196,6 +209,7 @@ def emit_board_live_event(
         "actor": config["WILY_BOARD_ACTOR"],
         "agent": str(phase.get("agent") or config.get("WILY_BOARD_AGENT") or "codex"),
         "event": event,
+        "event_id": str(phase.get("event_id") or new_live_event_id()),
         "live_status": live_status,
         "session_id": str(phase.get("session_id", "")),
         "session_path": str(phase.get("current_session", "")),
@@ -213,6 +227,8 @@ def emit_board_live_event(
         "owner",
         "depends_on",
         "execution_mode",
+        "old_item_id",
+        "new_item_id",
         "raw_path",
         "position",
     ):
@@ -835,6 +851,17 @@ def heartbeat_interval(root: Path) -> str:
     return os.environ.get("WILY_BOARD_HEARTBEAT_INTERVAL") or config.get("WILY_BOARD_HEARTBEAT_INTERVAL") or "30"
 
 
+def heartbeat_ttl_from_env() -> float:
+    raw = os.environ.get("WILY_BOARD_HEARTBEAT_TTL_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_HEARTBEAT_TTL_SECONDS
+    try:
+        ttl = float(raw)
+    except ValueError:
+        return DEFAULT_HEARTBEAT_TTL_SECONDS
+    return ttl if ttl >= 0 else DEFAULT_HEARTBEAT_TTL_SECONDS
+
+
 def spawn_heartbeat_sidecar(root: Path, item: Phase, session_id: str) -> None:
     command = [
         sys.executable,
@@ -861,6 +888,32 @@ def spawn_heartbeat_sidecar(root: Path, item: Phase, session_id: str) -> None:
 def open_live_session(root: Path, item: Phase) -> dict[str, Any]:
     recover_orphan_live_sessions(root)
     return write_live_registry(root, item, event="start", live_status="claimed")
+
+
+def emit_renamed_live_events(root: Path, old_item_id: str, new_item_id: str) -> list[BoardLiveEventResult]:
+    results: list[BoardLiveEventResult] = []
+    for path in active_live_registry_files(root):
+        payload = read_live_registry(path)
+        if not payload:
+            continue
+        current_item_id = str(payload.get("current_item_id") or payload.get("item_id") or "")
+        if current_item_id != old_item_id:
+            continue
+        updated = {
+            **payload,
+            "item_id": old_item_id,
+            "current_item_id": new_item_id,
+            "old_item_id": old_item_id,
+            "new_item_id": new_item_id,
+        }
+        saved = {**payload, "item_id": new_item_id, "current_item_id": new_item_id}
+        if str(saved.get("item_type", "")) == "stage":
+            saved["stage_id"] = new_item_id
+        elif str(saved.get("item_type", "")) == "phase":
+            saved["phase_id"] = new_item_id
+        path.write_text(json.dumps(saved, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        results.append(emit_board_live_event(root, updated, "renamed", "active"))
+    return results
 
 
 def close_live_sessions(
@@ -2121,7 +2174,7 @@ def command_live_heartbeat(root: Path, args: list[str]) -> int:
     note = "active"
     session_id = ""
     parent_shell_pid = 0
-    ttl = 0.0
+    ttl = heartbeat_ttl_from_env()
     index = 1
     while index < len(args):
         option = args[index]

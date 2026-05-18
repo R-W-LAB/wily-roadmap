@@ -294,9 +294,10 @@ stages:
   - id: "s31"
     title: "Heartbeat 잔여 (renamed/event_id/secrets/TTL) + SSE polish"
     path: "stages/s31-heartbeat-tail-sse-polish"
-    status: "pending"
+    status: "done"
     depends_on: ["s24"]
     execution_mode: "decomposed"
     decomposition_status: "applied"
     owner: "codex"
     task: "wily-board-local-activity-heartbeat 플랜의 마무리 항목(renamed event, event_id+dedup, WILY_BOARD_SECRETS 듀얼 시크릿 회전, HEARTBEAT_TTL env 기본값)과 spec §6.3 SSE 거동(per-page 필터, exponential backoff, tab visibility)을 정합한다"
+    current_session: "sessions/2026-05-18-154854-phase-s31-31-5-attempt-1"

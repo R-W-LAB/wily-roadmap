@@ -2805,6 +2805,105 @@ class WilyCliTest(unittest.TestCase):
             )
             self.assertEqual(cache["last_success"]["event"], "start")
 
+    def test_emit_board_live_event_includes_event_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily").mkdir()
+            values = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                "WILY_BOARD_ACTOR": "airmang",
+            }
+            response = MagicMock()
+            response.__enter__ = MagicMock(return_value=response)
+            response.__exit__ = MagicMock(return_value=None)
+
+            with patch.dict(os.environ, values, clear=True), patch(
+                "urllib.request.urlopen", return_value=response
+            ) as urlopen:
+                ok, err = wily.emit_board_live_event(
+                    project,
+                    {"id": "01", "item_id": "01", "item_type": "phase", "phase_id": "01"},
+                    "start",
+                    "claimed",
+                )
+
+            self.assertTrue(ok, err)
+            payload = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+            self.assertIn("event_id", payload)
+            self.assertIsInstance(payload["event_id"], str)
+            self.assertTrue(payload["event_id"])
+
+    def test_emit_board_live_event_preserves_supplied_event_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily").mkdir()
+            values = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                "WILY_BOARD_ACTOR": "airmang",
+            }
+            response = MagicMock()
+            response.__enter__ = MagicMock(return_value=response)
+            response.__exit__ = MagicMock(return_value=None)
+
+            with patch.dict(os.environ, values, clear=True), patch(
+                "urllib.request.urlopen", return_value=response
+            ) as urlopen:
+                ok, err = wily.emit_board_live_event(
+                    project,
+                    {
+                        "id": "01",
+                        "item_id": "01",
+                        "item_type": "phase",
+                        "phase_id": "01",
+                        "event_id": "evt-fixed-1",
+                    },
+                    "start",
+                    "claimed",
+                )
+
+            self.assertTrue(ok, err)
+            payload = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+            self.assertEqual(payload["event_id"], "evt-fixed-1")
+
+    def test_emit_board_live_event_uses_unique_event_ids_for_distinct_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".wily").mkdir()
+            values = {
+                "WILY_BOARD_URL": "https://board.example",
+                "WILY_BOARD_SECRET": "secret",
+                "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                "WILY_BOARD_ACTOR": "airmang",
+            }
+            response = MagicMock()
+            response.__enter__ = MagicMock(return_value=response)
+            response.__exit__ = MagicMock(return_value=None)
+
+            with patch.dict(os.environ, values, clear=True), patch(
+                "urllib.request.urlopen", return_value=response
+            ) as urlopen:
+                wily.emit_board_live_event(
+                    project,
+                    {"id": "01", "item_id": "01", "item_type": "phase", "phase_id": "01"},
+                    "start",
+                    "claimed",
+                )
+                wily.emit_board_live_event(
+                    project,
+                    {"id": "01", "item_id": "01", "item_type": "phase", "phase_id": "01"},
+                    "heartbeat",
+                    "active",
+                )
+
+            payloads = [
+                json.loads(call.args[0].data.decode("utf-8")) for call in urlopen.call_args_list
+            ]
+            self.assertNotEqual(payloads[0]["event_id"], payloads[1]["event_id"])
+
     def test_board_check_prints_last_emit_when_cache_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -2964,6 +3063,86 @@ class WilyCliTest(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(emitted, [("01", "release", "released")])
             self.assertFalse(active_file.exists())
+
+    def test_emit_renamed_live_events_updates_active_registry_item_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            active = project / ".wily" / "local" / "live" / "active"
+            active.mkdir(parents=True)
+            registry = active / "sid-1.json"
+            registry.write_text(
+                json.dumps(
+                    {
+                        "session_id": "sid-1",
+                        "item_type": "stage",
+                        "item_id": "s21",
+                        "current_item_id": "s21",
+                        "stage_id": "s21",
+                        "agent": "codex",
+                        "actor": "airmang",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            emitted: list[tuple[str, dict[str, object], str, str]] = []
+
+            def record_event(
+                root: Path, phase: wily.Phase, event: str, live_status: str, note: str = ""
+            ) -> wily.BoardLiveEventResult:
+                emitted.append((event, dict(phase), live_status, note))
+                return True, ""
+
+            with patch.object(wily, "emit_board_live_event", side_effect=record_event):
+                results = wily.emit_renamed_live_events(project, "s21", "s22")
+
+            self.assertEqual(results, [(True, "")])
+            self.assertEqual(len(emitted), 1)
+            event, payload, live_status, _note = emitted[0]
+            self.assertEqual(event, "renamed")
+            self.assertEqual(live_status, "active")
+            self.assertEqual(payload["session_id"], "sid-1")
+            self.assertEqual(payload["item_id"], "s21")
+            self.assertEqual(payload["current_item_id"], "s22")
+            self.assertEqual(payload["old_item_id"], "s21")
+            self.assertEqual(payload["new_item_id"], "s22")
+            saved = json.loads(registry.read_text(encoding="utf-8"))
+            self.assertEqual(saved["item_id"], "s22")
+            self.assertEqual(saved["current_item_id"], "s22")
+
+    def test_emit_renamed_live_events_skips_sessions_without_matching_item(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            active = project / ".wily" / "local" / "live" / "active"
+            active.mkdir(parents=True)
+            (active / "sid-1.json").write_text(
+                json.dumps({"session_id": "sid-1", "item_id": "s20", "current_item_id": "s20"}),
+                encoding="utf-8",
+            )
+
+            with patch.object(wily, "emit_board_live_event") as emit:
+                results = wily.emit_renamed_live_events(project, "s21", "s22")
+
+            self.assertEqual(results, [])
+            emit.assert_not_called()
+
+    def test_emit_renamed_live_events_keeps_workflow_local_when_board_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            active = project / ".wily" / "local" / "live" / "active"
+            active.mkdir(parents=True)
+            registry = active / "sid-1.json"
+            registry.write_text(
+                json.dumps({"session_id": "sid-1", "item_id": "s21", "current_item_id": "s21"}),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, isolated_env(), clear=True):
+                results = wily.emit_renamed_live_events(project, "s21", "s22")
+
+            self.assertEqual(results, [(False, "missing config")])
+            saved = json.loads(registry.read_text(encoding="utf-8"))
+            self.assertEqual(saved["item_id"], "s22")
+            self.assertEqual(saved["current_item_id"], "s22")
 
     def test_release_cleans_live_registry_without_changing_phase_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3803,6 +3982,116 @@ class WilyCliTest(unittest.TestCase):
                 ],
             )
             sleep.assert_called_once_with(0.01)
+
+    def test_live_heartbeat_uses_env_ttl_when_ttl_arg_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, isolated_env(), clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            emitted: list[tuple[str, str]] = []
+
+            def record_event(
+                root: Path, phase: wily.Phase, event: str, live_status: str, note: str = ""
+            ) -> wily.BoardLiveEventResult:
+                emitted.append((event, live_status))
+                return True, ""
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                    "WILY_BOARD_HEARTBEAT_TTL_SECONDS": "2",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event), patch.object(
+                wily.time, "monotonic", side_effect=[0.0, 3.0]
+            ), patch.object(wily.time, "sleep", return_value=None):
+                result = wily.command_live_heartbeat(
+                    project, ["01", "--session", session_id, "--count", "1"]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("release", "released")])
+            self.assertFalse(active_file.exists())
+
+    def test_live_heartbeat_ttl_arg_overrides_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, isolated_env(), clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            emitted: list[tuple[str, str]] = []
+
+            def record_event(
+                root: Path, phase: wily.Phase, event: str, live_status: str, note: str = ""
+            ) -> wily.BoardLiveEventResult:
+                emitted.append((event, live_status))
+                return True, ""
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                    "WILY_BOARD_HEARTBEAT_TTL_SECONDS": "2",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event), patch.object(
+                wily.time, "monotonic", side_effect=[0.0, 3.0]
+            ), patch.object(wily.time, "sleep", return_value=None):
+                result = wily.command_live_heartbeat(
+                    project, ["01", "--session", session_id, "--ttl", "0", "--count", "1"]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("heartbeat", "active")])
+            self.assertTrue(active_file.exists())
+
+    def test_live_heartbeat_ttl_expiry_releases_and_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_ready_phase(project)
+            with patch.dict(os.environ, isolated_env(), clear=True):
+                self.assertEqual(wily.command_start(project, ["01"]), 0)
+            active_file = next((project / ".wily" / "local" / "live" / "active").glob("*.json"))
+            session_id = json.loads(active_file.read_text(encoding="utf-8"))["session_id"]
+            emitted: list[tuple[str, str]] = []
+
+            def record_event(
+                root: Path, phase: wily.Phase, event: str, live_status: str, note: str = ""
+            ) -> wily.BoardLiveEventResult:
+                emitted.append((event, live_status))
+                return True, ""
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WILY_BOARD_URL": "https://board.example",
+                    "WILY_BOARD_SECRET": "secret",
+                    "WILY_BOARD_REPO": "R-W-LAB/wily-roadmap",
+                    "WILY_BOARD_ACTOR": "airmang",
+                },
+                clear=True,
+            ), patch.object(wily, "emit_board_live_event", side_effect=record_event), patch.object(
+                wily.time, "monotonic", side_effect=[0.0, 3.0]
+            ), patch.object(wily.time, "sleep", return_value=None):
+                result = wily.command_live_heartbeat(
+                    project, ["01", "--session", session_id, "--ttl", "2"]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(emitted, [("release", "released")])
+            self.assertFalse(active_file.exists())
 
     def test_block_without_current_session_updates_roadmap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
