@@ -17,6 +17,7 @@ python3 <plugin-root>/scripts/wily.py go <id> [--json]
 
 - Read-only: status is not changed.
 - Requires the task to be `in_progress`.
+- The emitted goal text tells custom-workflow to use `wily cp <id> start <cp-name>`, `wily cp <id> done <cp-name>`, and `wily cp <id> import-status <status.md>` so `.wily/tasks/<id>/progress.jsonl` remains the Roadmap checkpoint ledger.
 
 ## Response Style
 

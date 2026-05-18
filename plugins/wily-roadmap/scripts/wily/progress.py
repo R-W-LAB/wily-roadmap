@@ -59,6 +59,14 @@ def append_event(paths: WilyPaths, task_id: str, event: CpEvent) -> None:
         fh.write(event.to_json() + "\n")
 
 
+def append_event_once(paths: WilyPaths, task_id: str, event: CpEvent) -> bool:
+    for existing in read_events(paths, task_id):
+        if existing.cp == event.cp and existing.event == event.event:
+            return False
+    append_event(paths, task_id, event)
+    return True
+
+
 def read_events(paths: WilyPaths, task_id: str) -> list[CpEvent]:
     target = paths.progress_jsonl(task_id)
     if not target.exists():
@@ -73,6 +81,32 @@ def read_events(paths: WilyPaths, task_id: str) -> list[CpEvent]:
         except (json.JSONDecodeError, KeyError, TypeError):
             continue
     return events
+
+
+def events_from_status_board(text: str, *, actor: str, ts: str) -> list[CpEvent]:
+    events: list[CpEvent] = []
+    for line in text.splitlines():
+        cells = _markdown_cells(line)
+        if len(cells) < 2:
+            continue
+        checkpoint, status = cells[0], cells[1].upper()
+        if checkpoint.lower() == "checkpoint" or set(status) <= {"-"}:
+            continue
+        if not checkpoint or not status:
+            continue
+        if status == "DONE":
+            events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="start"))
+            events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="done"))
+        elif status in {"RUNNING", "VERIFYING", "PARTIAL", "BLOCKED"}:
+            events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="start"))
+    return events
+
+
+def _markdown_cells(line: str) -> list[str]:
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return []
+    return [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
 
 
 def cp_summary(paths: WilyPaths, task_id: str) -> CpSummary:

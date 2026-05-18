@@ -15,6 +15,7 @@ COMMANDS = (
     "init",
     "next",
     "claim",
+    "cp",
     "go",
     "done",
     "block",

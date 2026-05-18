@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MARKETPLACE = ROOT.parents[1] / ".agents" / "plugins" / "marketplace.json"
 
-COMMANDS = {"init", "next", "claim", "go", "done", "block", "replan", "land", "watch", "status"}
+COMMANDS = {"init", "next", "claim", "go", "done", "block", "replan", "land", "watch", "status", "cp"}
 SKILLS = {f"wily-{name}" for name in COMMANDS} | {"wily-execute"}
 
 
@@ -59,6 +59,18 @@ class V3SurfaceTest(unittest.TestCase):
                 self.assertIn("병렬 가능", text)
                 self.assertIn("scope conflict", text)
                 self.assertIn("작업자 여력", text)
+
+    def test_custom_workflow_checkpoint_contract_uses_wily_cp(self) -> None:
+        go = (ROOT / "skills" / "wily-go" / "SKILL.md").read_text(encoding="utf-8")
+        execute = (ROOT / "skills" / "wily-execute" / "SKILL.md").read_text(encoding="utf-8")
+        cp = (ROOT / "skills" / "wily-cp" / "SKILL.md").read_text(encoding="utf-8")
+        command = (ROOT / "commands" / "cp.md").read_text(encoding="utf-8")
+
+        for text in (go, execute, cp, command):
+            with self.subTest(path="cp-contract"):
+                self.assertIn("wily cp", text)
+                self.assertIn("import-status", text)
+                self.assertIn("progress.jsonl", text)
 
     def test_v2_runtime_files_are_removed(self) -> None:
         removed = {

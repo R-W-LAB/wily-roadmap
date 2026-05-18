@@ -10,10 +10,12 @@ When the user says "T03 cw로 진행해줘" or asks to process the next Wily tas
 1. Run `wily status` or `wily next` to confirm the task.
 2. Run `wily claim <id>` to record actor, timestamp, claim SHA, and progress file.
 3. Run `wily go <id>` and pass the emitted block to `custom-workflow-skillset:plan-goal-runner`.
-4. Let custom-workflow append cp events to `.wily/tasks/<id>/progress.jsonl` and use `Wily-Task: <id>` / `Wily-CP: <name>` commit trailers.
-5. Compare the result against task acceptance and report scope drift.
-6. Run `wily done <id>` only after verification.
-7. Run `wily land <id>` only after explicit user approval.
+4. During custom-workflow, record every checkpoint in Wily with `wily cp <id> start <cp-name>` and `wily cp <id> done <cp-name>` so `.wily/tasks/<id>/progress.jsonl` drives `wily watch`.
+5. If custom-workflow already produced a status board, run `wily cp <id> import-status agent-handoffs/<slug>-status.md` to backfill checkpoint progress into `.wily/tasks/<id>/progress.jsonl`.
+6. Use `Wily-Task: <id>` / `Wily-CP: <name>` commit trailers where commits are created.
+7. Compare the result against task acceptance and report scope drift.
+8. Run `wily done <id>` only after verification.
+9. Run `wily land <id>` only after explicit user approval.
 
 ## Guardrails
 

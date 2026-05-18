@@ -14,13 +14,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "wily.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from wily.cli import block as block_cmd, next as next_cmd, replan as replan_cmd, watch as watch_cmd  # noqa: E402
+from wily.cli import block as block_cmd, cp as cp_cmd, next as next_cmd, replan as replan_cmd, watch as watch_cmd  # noqa: E402
 from wily.cli import init as init_cmd  # noqa: E402
 from wily.config import load_actors, load_tasks, save_actors, save_tasks  # noqa: E402
 from wily.models import Actor, Task, TaskStatus  # noqa: E402
 from wily.observation import observation_base  # noqa: E402
 from wily.paths import WilyPaths, WilyRootNotFound, find_wily_root  # noqa: E402
-from wily.progress import CpEvent, CpSummary, append_event, cp_summary, init_progress  # noqa: E402
+from wily.progress import CpEvent, CpSummary, append_event, cp_summary, init_progress, read_events  # noqa: E402
 from wily.transitions import DependencyError, TransitionError, apply_claim, apply_done, check_dependencies  # noqa: E402
 from wily.ui.watch_layout import WatchLayoutConfig  # noqa: E402
 from wily.ui.watch_activity import build_activity_lines  # noqa: E402
@@ -68,6 +68,127 @@ class CoreModelTest(unittest.TestCase):
             summary = cp_summary(paths, "T01")
             self.assertEqual((summary.total, summary.done), (1, 1))
             self.assertEqual(summary.cp_names, ["plan"])
+
+    def test_cp_command_records_progress_for_watch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_actors(paths, [Actor(id="wily", display="Wily", git_author_emails=["wily@example.com"])])
+            save_tasks(
+                paths,
+                "demo",
+                [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")],
+            )
+
+            with chdir_compat(root):
+                self.assertEqual(cp_cmd.main(["T01", "start", "plan", "--actor", "wily", "--ts", "2026-05-18T00:00:00Z"]), 0)
+                self.assertEqual(cp_cmd.main(["T01", "done", "plan", "--actor", "wily", "--ts", "2026-05-18T00:01:00Z"]), 0)
+
+            summary = cp_summary(paths, "T01")
+            self.assertEqual((summary.total, summary.done, summary.current_cp), (1, 1, None))
+            output = render_watch(
+                project_title="Demo",
+                tasks=[Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")],
+                actors=[Actor(id="wily", display="Wily")],
+                observed_commits=[],
+                cp_summaries={"T01": summary},
+                mode="solo",
+                ui="ascii",
+            )
+            self.assertIn("체크포인트 [#] 1/1", output)
+
+    def test_cp_command_appends_distinct_notes_for_same_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_actors(paths, [Actor(id="wily", display="Wily", git_author_emails=["wily@example.com"])])
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+
+            with chdir_compat(root):
+                self.assertEqual(cp_cmd.main(["T01", "note", "plan", "--note", "first", "--actor", "wily", "--ts", "2026-05-18T00:00:00Z"]), 0)
+                self.assertEqual(cp_cmd.main(["T01", "note", "plan", "--note", "second", "--actor", "wily", "--ts", "2026-05-18T00:01:00Z"]), 0)
+
+            events = read_events(paths, "T01")
+            self.assertEqual([(event.event, event.note) for event in events], [("note", "first"), ("note", "second")])
+
+    def test_cp_cli_dispatch_records_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_actors(paths, [Actor(id="wily", display="Wily", git_author_emails=["wily@example.com"])])
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "cp",
+                    "T01",
+                    "start",
+                    "plan",
+                    "--actor",
+                    "wily",
+                    "--ts",
+                    "2026-05-18T00:00:00Z",
+                ],
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("T01 cp start: plan", result.stdout)
+            self.assertEqual(cp_summary(paths, "T01").current_cp, "plan")
+
+    def test_cp_import_status_converts_custom_workflow_board_idempotently(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_actors(paths, [Actor(id="wily", display="Wily", git_author_emails=["wily@example.com"])])
+            save_tasks(
+                paths,
+                "demo",
+                [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")],
+            )
+            status = root / "agent-handoffs" / "demo-status.md"
+            status.parent.mkdir()
+            status.write_text(
+                "\n".join(
+                    [
+                        "| Checkpoint | Status | Evidence |",
+                        "| --- | --- | --- |",
+                        "| Execution package | DONE | created |",
+                        "| RED tests | DONE | failed then passed |",
+                        "| Implementation | RUNNING | current |",
+                        "| Future | PENDING | waiting |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with chdir_compat(root):
+                args = ["T01", "import-status", str(status.relative_to(root)), "--actor", "wily", "--ts", "2026-05-18T00:00:00Z"]
+                self.assertEqual(cp_cmd.main(args), 0)
+                self.assertEqual(cp_cmd.main(args), 0)
+
+            events = read_events(paths, "T01")
+            self.assertEqual([(event.cp, event.event) for event in events], [
+                ("Execution package", "start"),
+                ("Execution package", "done"),
+                ("RED tests", "start"),
+                ("RED tests", "done"),
+                ("Implementation", "start"),
+            ])
+            summary = cp_summary(paths, "T01")
+            self.assertEqual((summary.total, summary.done, summary.current_cp), (3, 2, "Implementation"))
 
     def test_parallel_metadata_round_trips_without_breaking_legacy_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

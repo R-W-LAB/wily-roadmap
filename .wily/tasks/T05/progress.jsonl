@@ -1,0 +1,8 @@
+{"ts": "2026-05-18T15:02:48Z", "actor": "wily", "cp": "execution-package", "event": "start"}
+{"ts": "2026-05-18T15:02:48Z", "actor": "wily", "cp": "execution-package", "event": "done"}
+{"ts": "2026-05-18T15:05:00Z", "actor": "wily", "cp": "red-tests", "event": "start"}
+{"ts": "2026-05-18T15:05:00Z", "actor": "wily", "cp": "red-tests", "event": "done"}
+{"ts": "2026-05-18T15:06:00Z", "actor": "wily", "cp": "implementation", "event": "start"}
+{"ts": "2026-05-18T15:10:00Z", "actor": "wily", "cp": "implementation", "event": "done"}
+{"ts": "2026-05-18T15:10:00Z", "actor": "wily", "cp": "final-verification", "event": "start"}
+{"ts": "2026-05-18T15:12:30Z", "actor": "wily", "cp": "final-verification", "event": "done"}
