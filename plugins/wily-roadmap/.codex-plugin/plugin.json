@@ -16,31 +16,7 @@
     "tasks",
     "orchestration"
   ],
-  "commands": [
-    {"name": "init", "path": "./commands/init.md"},
-    {"name": "next", "path": "./commands/next.md"},
-    {"name": "claim", "path": "./commands/claim.md"},
-    {"name": "go", "path": "./commands/go.md"},
-    {"name": "done", "path": "./commands/done.md"},
-    {"name": "block", "path": "./commands/block.md"},
-    {"name": "replan", "path": "./commands/replan.md"},
-    {"name": "land", "path": "./commands/land.md"},
-    {"name": "watch", "path": "./commands/watch.md"},
-    {"name": "status", "path": "./commands/status.md"}
-  ],
-  "skills": [
-    {"name": "wily-init", "path": "./skills/wily-init/SKILL.md"},
-    {"name": "wily-next", "path": "./skills/wily-next/SKILL.md"},
-    {"name": "wily-claim", "path": "./skills/wily-claim/SKILL.md"},
-    {"name": "wily-go", "path": "./skills/wily-go/SKILL.md"},
-    {"name": "wily-done", "path": "./skills/wily-done/SKILL.md"},
-    {"name": "wily-block", "path": "./skills/wily-block/SKILL.md"},
-    {"name": "wily-replan", "path": "./skills/wily-replan/SKILL.md"},
-    {"name": "wily-land", "path": "./skills/wily-land/SKILL.md"},
-    {"name": "wily-watch", "path": "./skills/wily-watch/SKILL.md"},
-    {"name": "wily-status", "path": "./skills/wily-status/SKILL.md"},
-    {"name": "wily-execute", "path": "./skills/wily-execute/SKILL.md"}
-  ],
+  "skills": "./skills/",
   "interface": {
     "displayName": "Wily Roadmap",
     "shortDescription": "Manage v3 project task lists and local agent workflow state.",

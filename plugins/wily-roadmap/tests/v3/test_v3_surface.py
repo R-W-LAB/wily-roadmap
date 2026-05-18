@@ -14,10 +14,14 @@ SKILLS = {f"wily-{name}" for name in COMMANDS} | {"wily-execute"}
 class V3SurfaceTest(unittest.TestCase):
     def test_plugin_manifest_exposes_v3_only(self) -> None:
         data = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual({item["name"] for item in data["commands"]}, COMMANDS)
-        self.assertEqual({item["name"] for item in data["skills"]}, SKILLS)
+        self.assertEqual(data["skills"], "./skills/")
+        self.assertEqual(data["version"], "3.0.0")
         self.assertNotIn("board", json.dumps(data).lower())
         self.assertNotIn("stage", json.dumps(data).lower())
+
+    def test_command_directories_are_exactly_v3(self) -> None:
+        docs = {path.stem for path in (ROOT / "commands").glob("*.md")}
+        self.assertEqual(docs, COMMANDS)
 
     def test_marketplace_points_to_plugin(self) -> None:
         data = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
