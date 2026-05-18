@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from .paths import WilyPaths
@@ -43,6 +43,7 @@ class CpSummary:
     done: int
     in_progress: int
     current_cp: str | None
+    cp_names: list[str] = field(default_factory=list)
 
 
 def init_progress(paths: WilyPaths, task_id: str) -> None:
@@ -78,9 +79,12 @@ def cp_summary(paths: WilyPaths, task_id: str) -> CpSummary:
     events = read_events(paths, task_id)
     started: dict[str, bool] = {}
     done: dict[str, bool] = {}
+    cp_order: list[str] = []
     for event in events:
         if event.event == "start":
             started.setdefault(event.cp, True)
+            if event.cp not in cp_order:
+                cp_order.append(event.cp)
         elif event.event == "done":
             done[event.cp] = True
     active = set(started) - set(done)
@@ -89,4 +93,6 @@ def cp_summary(paths: WilyPaths, task_id: str) -> CpSummary:
         if event.event == "start" and event.cp in active:
             current = event.cp
             break
-    return CpSummary(total=len(started), done=len(done), in_progress=len(active), current_cp=current)
+    return CpSummary(
+        total=len(started), done=len(done), in_progress=len(active), current_cp=current, cp_names=cp_order
+    )
