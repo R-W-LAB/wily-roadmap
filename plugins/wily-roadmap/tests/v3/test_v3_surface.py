@@ -50,6 +50,8 @@ class V3SurfaceTest(unittest.TestCase):
         self.assertIn("wily-agent", command)
         for token in ("install", "configure", "start", "stop", "status", "check", "launchd", "foreground"):
             self.assertIn(token, skill)
+        for token in ("$wily-agent install", "$wily-agent start", "Do not ask the user to find the plugin root"):
+            self.assertIn(token, skill)
         self.assertIn("local-first", skill)
         self.assertIn("approval-first", skill)
 

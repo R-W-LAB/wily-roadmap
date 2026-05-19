@@ -2,6 +2,17 @@
 
 Use `wily agent` to install and manage the bundled Wily Board v3 sync daemon.
 
+In Codex, users can ask through the plugin command without knowing the plugin
+filesystem path:
+
+```text
+$wily-agent status
+$wily-agent install
+$wily-agent start
+```
+
+Codex should resolve the plugin root and run the internal helper command.
+
 Common commands:
 
 ```bash

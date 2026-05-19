@@ -15,6 +15,22 @@ heartbeats to Wily Board.
 python3 <plugin-root>/scripts/wily.py agent <login|install|configure|register|unregister|start|stop|status|check|run|dev>
 ```
 
+## Codex Command Usage
+
+Users may invoke this skill through Codex plugin commands such as:
+
+- `$wily-agent status`
+- `$wily-agent login <one-time-code> --url https://rnwlab.duckdns.org --actor <actor-id>`
+- `$wily-agent register --repo OWNER/REPO`
+- `$wily-agent install`
+- `$wily-agent start`
+- `$wily-agent run --once --json`
+
+When the user asks through `$wily-agent`, run the internal command from this
+plugin directly. Do not ask the user to find the plugin root or manually type
+`<plugin-root>/wily`. The skill exists so Codex can resolve the plugin root and
+perform the local daemon action on the user's behalf.
+
 ## Behavior
 
 - `login` exchanges a Board one-time code for a local machine token.
@@ -33,6 +49,7 @@ python3 <plugin-root>/scripts/wily.py agent <login|install|configure|register|un
 - Do not expose secrets in responses.
 - Do not run production Board calls unless the user explicitly configured them.
 - Prefer `wily agent run --once --offline-ok` for smoke checks.
+- For install/start/status requests, execute the command directly and report the result.
 
 ## Response Style
 
