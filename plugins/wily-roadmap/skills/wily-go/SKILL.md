@@ -18,6 +18,11 @@ python3 <plugin-root>/scripts/wily.py go <id> [--json]
 - Read-only: status is not changed.
 - Requires the task to be `in_progress`.
 - The emitted goal text tells custom-workflow to use `wily cp <id> start <cp-name>`, `wily cp <id> done <cp-name>`, and `wily cp <id> import-status <status.md>` so `.wily/tasks/<id>/progress.jsonl` remains the Roadmap checkpoint ledger.
+- Custom Workflow interface contract: custom-workflow does not update Wily by itself; the emitted checklist closes the cp automation gap for keeping Wily in sync.
+- The default import-status recovery path is `.wily/handoffs/<id>/status.md`; `.wily/handoffs/<task-id>/status.md` is the template form.
+- Use `wily cp <id> import-status .wily/handoffs/<id>/status.md` when a status board exists before checkpoint events were recorded.
+- Custom Workflow interface contract: the cp automation gap is closed manually with `wily cp <id> import-status` when checkpoint calls were missed.
+- The default handoff status path is `.wily/handoffs/<id>/status.md`.
 
 ## Response Style
 

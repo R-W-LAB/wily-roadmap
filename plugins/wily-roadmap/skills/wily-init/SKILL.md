@@ -17,6 +17,7 @@ python3 <plugin-root>/scripts/wily.py init [--new|--adopt|answer|back|revise|sho
 
 - State-changing: stores interview draft in `.wily/init/draft.yaml`.
 - `commit` creates or updates only the Wily-managed sections in root `AGENTS.md` and `CLAUDE.md`; existing project guidance is preserved.
+- `commit` best-effort registers the repo with `wily-agent` when local agent config includes a Board repo; failure prints manual registration guidance and does not fail init.
 - `adopt-legacy` archives old v2 `.wily/` children under `.wily/archive/`.
 
 ## Response Style

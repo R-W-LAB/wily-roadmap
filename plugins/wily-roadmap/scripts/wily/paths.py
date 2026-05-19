@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 
 class WilyRootNotFound(Exception):
@@ -57,6 +58,20 @@ class WilyPaths:
         return self.task_dir(task_id) / "acceptance.md"
 
     @property
+    def handoffs_dir(self) -> Path:
+        return self.wily_dir / "handoffs"
+
+    def handoff_dir(self, task_id: str) -> Path:
+        return self.handoffs_dir / task_id
+
+    def handoff_status_md(self, task_id: str) -> Path:
+        return self.handoff_dir(task_id) / "status.md"
+
+    @property
+    def touch_file(self) -> Path:
+        return self.wily_dir / ".touch"
+
+    @property
     def init_dir(self) -> Path:
         return self.wily_dir / "init"
 
@@ -65,5 +80,44 @@ class WilyPaths:
         return self.init_dir / "draft.yaml"
 
     @property
+    def replan_draft(self) -> Path:
+        return self.init_dir / "replan-draft.yaml"
+
+    @property
     def archive_dir(self) -> Path:
         return self.wily_dir / "archive"
+
+
+def migrate_legacy_handoffs(paths: WilyPaths) -> int:
+    legacy_dir = paths.root / "agent-handoffs"
+    if not legacy_dir.is_dir():
+        return 0
+    moved = 0
+    for source in sorted(path for path in legacy_dir.rglob("*") if path.is_file()):
+        task_id = _handoff_task_id(source.name)
+        destination = paths.handoff_dir(task_id) / source.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            continue
+        source.rename(destination)
+        moved += 1
+    try:
+        legacy_dir.rmdir()
+    except OSError:
+        pass
+    return moved
+
+
+def touch_wily(paths: WilyPaths) -> None:
+    paths.wily_dir.mkdir(parents=True, exist_ok=True)
+    paths.touch_file.touch()
+
+
+def _handoff_task_id(name: str) -> str:
+    match = re.search(r"(?i)\bt\d+\b", name)
+    if match:
+        return match.group(0).upper()
+    match = re.match(r"(?i)t(\d+)[-_]", name)
+    if match:
+        return f"T{match.group(1)}"
+    return "legacy"

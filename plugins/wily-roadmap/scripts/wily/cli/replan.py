@@ -3,18 +3,40 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import stat
+import subprocess
+import sys
 from typing import Any
 
 import yaml
 
-from ..config import load_tasks, save_tasks
-from ..models import Task, TaskStatus
-from ..paths import WilyPaths, WilyRootNotFound, find_wily_root
+from ..config import load_actors, load_tasks, save_tasks, upsert_actor
+from ..hooks.drift_guard import run_pre_commit_guard
+from ..models import Actor, Task, TaskStatus
+from ..paths import WilyPaths, WilyRootNotFound, find_wily_root, touch_wily
 from ..transitions import DependencyError, check_dependencies
 from . import _common
 
+DESCRIPTION = "stage and commit task list edits"
+USAGE = "usage: wily replan <show|add|revise-task|drop|assign|project|actor|commit|drift-guard|install-pre-commit-hook|cancel> [args]"
+HELP = "\n".join(
+    [
+        "Subcommands:",
+        "  show                         print current tasks and draft status",
+        "  add <title>                  stage a new task",
+        "  revise-task <id> <field> ... stage a task edit",
+        "  drop <task-id>               stage task deletion",
+        "  assign <task-id> <actor>     stage assignee change",
+        "  actor add <id> [--email=...] add or update an actor",
+        "  commit                       apply staged changes",
+        "  cancel                       discard the draft",
+    ]
+)
+
 
 def main(args: list[str]) -> int:
+    args, as_json = _common.consume_json_flag(args)
     try:
         root = find_wily_root(Path.cwd())
     except WilyRootNotFound as exc:
@@ -22,7 +44,7 @@ def main(args: list[str]) -> int:
         return _common.EXIT_FAILURE
     paths = WilyPaths(root)
     if not args or args[0] == "show":
-        return _show(paths)
+        return _show(paths, as_json=as_json)
     sub, rest = args[0], args[1:]
     if sub == "add":
         return _add(paths, rest)
@@ -34,8 +56,14 @@ def main(args: list[str]) -> int:
         return _assign(paths, rest)
     if sub == "project":
         return _project(paths, rest)
+    if sub == "actor":
+        return _actor(paths, rest)
     if sub == "commit":
         return _commit(paths)
+    if sub == "drift-guard":
+        return _drift_guard(root, paths, rest)
+    if sub == "install-pre-commit-hook":
+        return _install_pre_commit_hook(root)
     if sub == "cancel":
         return _cancel(paths)
     _common.emit_error(f"unknown replan subcommand: {sub}")
@@ -43,25 +71,35 @@ def main(args: list[str]) -> int:
 
 
 def _load(paths: WilyPaths) -> dict[str, Any]:
-    if paths.init_draft.exists():
-        return yaml.safe_load(paths.init_draft.read_text(encoding="utf-8")) or {}
+    if paths.replan_draft.exists():
+        return yaml.safe_load(paths.replan_draft.read_text(encoding="utf-8")) or {}
     return {"mode": "replan", "added": [], "edits": {}, "dropped": []}
 
 
 def _save(paths: WilyPaths, draft: dict[str, Any]) -> None:
     paths.init_dir.mkdir(parents=True, exist_ok=True)
-    paths.init_draft.write_text(
+    paths.replan_draft.write_text(
         yaml.safe_dump(draft, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
+    touch_wily(paths)
 
 
-def _show(paths: WilyPaths) -> int:
+def _show(paths: WilyPaths, *, as_json: bool = False) -> int:
     title, tasks = load_tasks(paths)
+    if as_json:
+        _common.emit_json(
+            {
+                "project_title": title,
+                "tasks": [task.to_dict() for task in tasks],
+                "draft_pending": paths.replan_draft.exists(),
+            }
+        )
+        return _common.EXIT_OK
     _common.emit_text(f"Project: {title}")
     for task in tasks:
         _common.emit_text(f"  {task.id} {task.status.value} {task.title}")
-    if paths.init_draft.exists():
+    if paths.replan_draft.exists():
         _common.emit_text("(draft pending)")
     return _common.EXIT_OK
 
@@ -108,9 +146,11 @@ def _revise(paths: WilyPaths, args: list[str]) -> int:
     if task is None:
         _common.emit_error(f"task not found: {task_id}")
         return _common.EXIT_FAILURE
-    if task.status == TaskStatus.DONE and field != "title":
+    if task.status == TaskStatus.DONE:
         _common.emit_error(f"{task_id} is done; refusing to revise {field}")
         return _common.EXIT_TRANSITION
+    if task.status == TaskStatus.IN_PROGRESS:
+        _common.emit_error(f"warning: {task_id} is in_progress")
     draft.setdefault("edits", {}).setdefault(task_id, {})[field] = parsed
     _save(paths, draft)
     _common.emit_text(f"draft: {task_id}.{field} updated")
@@ -162,6 +202,40 @@ def _project(paths: WilyPaths, args: list[str]) -> int:
     return _common.EXIT_OK
 
 
+def _actor(paths: WilyPaths, args: list[str]) -> int:
+    if len(args) < 2 or args[0] != "add":
+        _common.emit_error("usage: wily replan actor add <id> [--email=<email>] [--name=<name>] [--display=<display>]")
+        return _common.EXIT_USAGE
+    actor_id = args[1]
+    values = _flag_values(args[2:])
+    existing = next((actor for actor in load_actors(paths) if actor.id == actor_id), None)
+    emails = list(existing.git_author_emails) if existing else []
+    names = list(existing.git_author_names) if existing else []
+    if values.get("--email") and values["--email"] not in emails:
+        emails.append(values["--email"])
+    if values.get("--name") and values["--name"] not in names:
+        names.append(values["--name"])
+    display = values.get("--display") or (existing.display if existing else actor_id)
+    upsert_actor(paths, Actor(id=actor_id, display=display, git_author_emails=emails, git_author_names=names, capacity=existing.capacity if existing else 1))
+    _common.emit_text(f"actor added: {actor_id}")
+    return _common.EXIT_OK
+
+
+def _flag_values(args: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token.startswith("--") and "=" in token:
+            key, value = token.split("=", 1)
+            values[key] = value
+        elif token.startswith("--") and index + 1 < len(args):
+            values[token] = args[index + 1]
+            index += 1
+        index += 1
+    return values
+
+
 def _apply(paths: WilyPaths) -> tuple[str, list[Task]]:
     title, tasks = load_tasks(paths)
     draft = _load(paths)
@@ -178,7 +252,7 @@ def _apply(paths: WilyPaths) -> tuple[str, list[Task]]:
 
 
 def _commit(paths: WilyPaths) -> int:
-    if not paths.init_draft.exists():
+    if not paths.replan_draft.exists():
         _common.emit_error("no draft pending")
         return _common.EXIT_FAILURE
     title, tasks = _apply(paths)
@@ -188,13 +262,75 @@ def _commit(paths: WilyPaths) -> int:
         _common.emit_error(f"dependency check failed: {exc}")
         return _common.EXIT_FAILURE
     save_tasks(paths, title, tasks)
-    paths.init_draft.unlink()
+    paths.replan_draft.unlink()
+    touch_wily(paths)
     _common.emit_text(f"replan applied: {len(tasks)} task(s)")
     return _common.EXIT_OK
 
 
 def _cancel(paths: WilyPaths) -> int:
-    if paths.init_draft.exists():
-        paths.init_draft.unlink()
+    if paths.replan_draft.exists():
+        paths.replan_draft.unlink()
+        touch_wily(paths)
     _common.emit_text("replan draft discarded")
     return _common.EXIT_OK
+
+
+def _drift_guard(root: Path, paths: WilyPaths, args: list[str]) -> int:
+    if "--from-hook" not in args:
+        _common.emit_error("usage: wily replan drift-guard --from-hook")
+        return _common.EXIT_USAGE
+    try:
+        stub = run_pre_commit_guard(root, paths)
+    except Exception as exc:
+        _common.emit_error(f"wily drift guard skipped: {exc}")
+        return _common.EXIT_OK
+    if stub:
+        _common.emit_text(f"drift guard: created {stub.id} {stub.title!r}")
+    return _common.EXIT_OK
+
+
+def _install_pre_commit_hook(root: Path) -> int:
+    hook_path = _git_hook_path(root, "pre-commit")
+    if hook_path is None:
+        _common.emit_error("not a git repository")
+        return _common.EXIT_FAILURE
+    hook_path.parent.mkdir(parents=True, exist_ok=True)
+    script = Path(__file__).resolve().parents[2] / "wily.py"
+    marker = "# wily-roadmap drift guard"
+    body = "\n".join(
+        [
+            "#!/bin/sh",
+            marker,
+            f"exec {sh_quote(sys.executable)} {sh_quote(str(script))} replan drift-guard --from-hook",
+            "",
+        ]
+    )
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8", errors="replace")
+        if existing.strip() and marker not in existing:
+            backup = hook_path.with_name("pre-commit.wily-backup")
+            os.replace(hook_path, backup)
+            _common.emit_text(f"existing pre-commit hook moved to {backup}")
+    hook_path.write_text(body, encoding="utf-8")
+    hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    _common.emit_text(f"pre-commit drift guard installed: {hook_path}")
+    return _common.EXIT_OK
+
+
+def _git_hook_path(root: Path, hook: str) -> Path | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-path", f"hooks/{hook}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    path = Path(result.stdout.strip())
+    return path if path.is_absolute() else root / path
+
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"

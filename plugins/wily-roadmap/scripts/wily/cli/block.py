@@ -5,12 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..config import load_tasks, save_tasks
-from ..paths import WilyPaths, WilyRootNotFound, find_wily_root
+from ..paths import WilyPaths, WilyRootNotFound, find_wily_root, touch_wily
 from ..transitions import TransitionError, apply_block
 from . import _common
 
+DESCRIPTION = "record a blocker on a task"
+USAGE = "usage: wily block <task-id> <reason...> [--json]"
+HELP = "\n".join(
+    [
+        "Options:",
+        "  --json  emit the updated task as JSON",
+    ]
+)
+
 
 def main(args: list[str]) -> int:
+    args, as_json = _common.consume_json_flag(args)
     if len(args) < 2:
         _common.emit_error("usage: wily block <task-id> <reason...>")
         return _common.EXIT_USAGE
@@ -35,6 +45,10 @@ def main(args: list[str]) -> int:
         _common.emit_error(str(exc))
         return _common.EXIT_TRANSITION
     save_tasks(paths, project_title, [updated if item.id == task_id else item for item in tasks])
+    touch_wily(paths)
+    if as_json:
+        _common.emit_json({"task": updated.to_dict()})
+        return _common.EXIT_OK
     _common.emit_text(f"{task_id}: {task.status.value} -> blocked")
     _common.emit_text(f"blocker: {reason}")
     return _common.EXIT_OK

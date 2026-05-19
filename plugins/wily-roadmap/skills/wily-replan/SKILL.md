@@ -19,7 +19,7 @@ Stage task list edits in `.wily/init/draft.yaml`, validate dependencies, and com
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py replan [add|revise-task|drop|assign|project|commit|cancel]
+python3 <plugin-root>/scripts/wily.py replan [add|revise-task|drop|assign|project|commit|cancel|install-pre-commit-hook]
 ```
 
 ## Behavior
@@ -27,6 +27,9 @@ python3 <plugin-root>/scripts/wily.py replan [add|revise-task|drop|assign|projec
 - State-changing: only `commit` updates durable task state.
 - Done tasks cannot be dropped and non-cosmetic done-task edits are rejected.
 - Natural-language work requests must produce Roadmap Task changes, not direct code or document changes.
+- `install-pre-commit-hook` is opt-in and installs a local git pre-commit drift guard.
+- The drift guard may create an in-progress `drift: <summary>` task for staged files when there is no active claim or staged files fall outside the active claim scope.
+- Hook-created drift tasks leave intent and acceptance blank so the user can later refine them with `replan revise-task`.
 
 ## Response Style
 

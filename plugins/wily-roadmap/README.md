@@ -14,6 +14,7 @@ From the plugin root:
 ./wily go T01
 ./wily done T01
 ./wily watch --once
+./wily agent check
 ```
 
 The launcher delegates to `scripts/wily.py` and keeps the current working
@@ -40,6 +41,33 @@ Wily v3 stores durable project state under `.wily/`:
 `wily go <id>` prints goal text for
 `custom-workflow-skillset:plan-goal-runner`. Wily does not invoke external
 runners directly.
+
+## Wily Agent
+
+The plugin includes a bundled `wily-agent` daemon for optional local heartbeat
+events. It watches registered `.wily` repositories and sends signed best-effort
+live events to Wily Board when local config is present.
+
+Typical onboarding:
+
+```bash
+wily agent check
+wily agent configure --url https://board.example --repo OWNER/REPO --actor wily --secret "$WILY_BOARD_SECRET"
+wily agent register --repo OWNER/REPO
+wily agent install
+wily agent start
+wily agent status
+```
+
+For foreground smoke tests or development:
+
+```bash
+wily agent dev --once --offline-ok
+```
+
+`wily agent stop` stops the macOS launchd daemon. Missing agent config, Board
+downtime, and invalid secrets are best-effort agent failures; normal Wily task
+commands continue to use local `.wily/` state.
 
 ## Safety
 

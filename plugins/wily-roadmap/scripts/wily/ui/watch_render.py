@@ -12,6 +12,7 @@ import unicodedata
 from ..models import Actor, Task, TaskStatus
 from ..observation import CommitInfo, guess_task_id, match_actor
 from ..progress import CpSummary
+from ..scheduling import dependencies_satisfied, schedule_key
 from .watch_layout import WatchLayoutConfig
 from .watch_activity import build_activity_lines
 
@@ -100,10 +101,6 @@ def _dependency_text_for_task(task: Task, task_map: dict[str, Task]) -> str | No
     if pending:
         return f"대기 중: {', '.join(pending)}"
     return None
-
-
-def _dependencies_satisfied(task: Task, task_map: dict[str, Task]) -> bool:
-    return all((dep := task_map.get(dep_id)) and dep.status == TaskStatus.DONE for dep_id in task.depends_on)
 
 
 def _parallel_text_for_task(task: Task) -> str | None:
@@ -254,9 +251,9 @@ def build_grouped_rows(
             dependency_text=_dependency_text_for_task(task, task_map),
             parallel_lane=task.parallel_lane,
             priority=task.priority,
-            parallel_text=_parallel_text_for_task(task) if task.status == TaskStatus.READY and _dependencies_satisfied(task, task_map) else None,
+            parallel_text=_parallel_text_for_task(task) if task.status == TaskStatus.READY and dependencies_satisfied(task, tasks) else None,
             capacity_text=_capacity_text_for_task(task, actor_map=actor_map, active_counts=active_counts)
-            if task.status == TaskStatus.READY and _dependencies_satisfied(task, task_map)
+            if task.status == TaskStatus.READY and dependencies_satisfied(task, tasks)
             else None,
             conflict_text=_scope_conflict_text(task, tasks),
             meta_text=_meta_for_task(task),
@@ -343,7 +340,7 @@ def render_watch(
         show_timeline=show_timeline,
         show_log=show_log,
     )
-    body = _render_rich(lines) if rich_enabled else "\n".join(text for text, _style in lines)
+    body = "\n".join(text for text, _style in lines)
     if ui == "rich" and not rich_enabled:
         return "\n".join(
             [
@@ -459,10 +456,27 @@ def _task_group_lines(
 
 def _sort_parallel_rows(rows: list[WatchRow]) -> list[WatchRow]:
     def key(row: WatchRow) -> tuple[int, str, str]:
-        priority = row.priority if row.priority is not None else 999
-        return (priority, row.parallel_text or "", row.task_id)
+        task = Task(
+            id=row.task_id,
+            title=row.title,
+            parallel_lane=row.parallel_lane,
+            priority=row.priority,
+            capacity_hint=_capacity_hint_from_parallel_text(row.parallel_text),
+        )
+        task_key = schedule_key(task)
+        return (task_key[0], task_key[1], f"{task_key[2]:06d}", task_key[3])
 
     return sorted(rows, key=key)
+
+
+def _capacity_hint_from_parallel_text(text: str | None) -> int | None:
+    if not text or "필요 여력 " not in text:
+        return None
+    raw = text.rsplit("필요 여력 ", 1)[-1].split(" ", 1)[0]
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 def _task_section_lines(
@@ -620,13 +634,14 @@ def _render_rich(lines: list[tuple[str, str]]) -> str:
     from rich.console import Console
 
     sink = StringIO()
+    width = max(get_terminal_size((96, 24)).columns, *(len(text) for text, _style in lines), 96)
     console = Console(
         file=sink,
         record=True,
         force_terminal=True,
         color_system="truecolor",
-        width=get_terminal_size((96, 24)).columns,
+        width=width,
     )
     for text, style in lines:
         console.print(text, style=style or None)
-    return console.export_text(styles=True).rstrip("\n")
+    return console.export_text(styles=False).rstrip("\n")

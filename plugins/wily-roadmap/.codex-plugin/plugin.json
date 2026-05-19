@@ -35,7 +35,8 @@
       "$wily-claim <id>: claim a task",
       "$wily-go <id>: emit custom-workflow goal text",
       "$wily-done <id>: close a verified task",
-      "$wily-replan: revise the task list"
+      "$wily-replan: revise the task list",
+      "$wily-agent: install and check the bundled heartbeat daemon"
     ],
     "brandColor": "#2563EB"
   }

@@ -6,11 +6,24 @@ from pathlib import Path
 
 from ..config import load_actors, load_tasks, repo_mode
 from ..models import TaskStatus
-from ..observation import list_commits_since_fork, observation_base
+from ..observation import fetch_observation_remote, list_commits_since_fork, list_remote_commits, observation_base
 from ..paths import WilyPaths, WilyRootNotFound, find_wily_root
 from ..progress import cp_summary
 from ..ui.watch_render import render_watch
 from . import _common
+
+DESCRIPTION = "print a one-shot project snapshot"
+USAGE = "usage: wily status [--json] [--ui <auto|ascii>] [--compact] [--show-timeline] [--hide-log]"
+HELP = "\n".join(
+    [
+        "Options:",
+        "  --json          emit project state as JSON",
+        "  --ui <mode>     choose renderer mode",
+        "  --compact       reduce output density",
+        "  --show-timeline include checkpoint timeline",
+        "  --hide-log      hide observed git log entries",
+    ]
+)
 
 
 def main(args: list[str]) -> int:
@@ -30,7 +43,12 @@ def main(args: list[str]) -> int:
     summaries = {task.id: cp_summary(paths, task.id) for task in tasks}
     observed = []
     try:
-        observed = list_commits_since_fork(root, observation_base(root), limit=20)
+        remote_ref = fetch_observation_remote(root)
+        if remote_ref:
+            observed.extend(list_remote_commits(root, remote_ref, limit=20))
+        observed.extend(list_commits_since_fork(root, observation_base(root), limit=20))
+        seen: set[str] = set()
+        observed = [commit for commit in observed if not (commit.sha in seen or seen.add(commit.sha))]
     except Exception:
         observed = []
     if as_json:

@@ -1,0 +1,6 @@
+{"ts": "2026-05-19T03:06:15Z", "actor": "wily", "cp": "red-tests", "event": "start"}
+{"ts": "2026-05-19T03:07:25Z", "actor": "wily", "cp": "red-tests", "event": "done"}
+{"ts": "2026-05-19T03:07:25Z", "actor": "wily", "cp": "implementation", "event": "start"}
+{"ts": "2026-05-19T03:07:25Z", "actor": "wily", "cp": "implementation", "event": "done"}
+{"ts": "2026-05-19T03:07:25Z", "actor": "wily", "cp": "final-verification", "event": "start"}
+{"ts": "2026-05-19T03:07:39Z", "actor": "wily", "cp": "final-verification", "event": "done"}

@@ -15,11 +15,36 @@ class TaskStatus(str, enum.Enum):
 
 
 @dataclass
+class AcceptanceItem:
+    text: str
+    status: str | None = None
+    evidence: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"text": self.text}
+        if self.status:
+            data["status"] = self.status
+        if self.evidence:
+            data["evidence"] = self.evidence
+        return data
+
+    @classmethod
+    def from_value(cls, value: Any) -> "AcceptanceItem":
+        if isinstance(value, dict):
+            return cls(
+                text=str(value.get("text") or ""),
+                status=str(value["status"]) if value.get("status") else None,
+                evidence=str(value["evidence"]) if value.get("evidence") else None,
+            )
+        return cls(text=str(value or ""))
+
+
+@dataclass
 class Task:
     id: str
     title: str
     intent: str = ""
-    acceptance: str = ""
+    acceptance: str | list[AcceptanceItem] = ""
     acceptance_file: str | None = None
     scope: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
@@ -39,7 +64,7 @@ class Task:
             "id": self.id,
             "title": self.title,
             "intent": self.intent,
-            "acceptance": self.acceptance,
+            "acceptance": _acceptance_to_dict_value(self.acceptance),
             "scope": list(self.scope),
             "depends_on": list(self.depends_on),
             "status": self.status.value,
@@ -66,7 +91,7 @@ class Task:
             id=str(data["id"]),
             title=str(data["title"]),
             intent=str(data.get("intent") or ""),
-            acceptance=str(data.get("acceptance") or ""),
+            acceptance=_acceptance_from_value(data.get("acceptance")),
             acceptance_file=data.get("acceptance_file"),
             scope=list(data.get("scope") or []),
             depends_on=list(data.get("depends_on") or []),
@@ -81,6 +106,18 @@ class Task:
             done_at=data.get("done_at"),
             blocker=data.get("blocker"),
         )
+
+    @property
+    def acceptance_items(self) -> list[AcceptanceItem]:
+        if isinstance(self.acceptance, list):
+            return self.acceptance
+        return [AcceptanceItem(text=self.acceptance)] if self.acceptance else []
+
+    @property
+    def acceptance_text(self) -> str:
+        if isinstance(self.acceptance, list):
+            return "\n".join(f"{index}. {item.text}" for index, item in enumerate(self.acceptance, start=1))
+        return self.acceptance
 
 
 @dataclass
@@ -123,3 +160,15 @@ def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _acceptance_from_value(value: Any) -> str | list[AcceptanceItem]:
+    if isinstance(value, list):
+        return [AcceptanceItem.from_value(item) for item in value]
+    return str(value or "")
+
+
+def _acceptance_to_dict_value(value: str | list[AcceptanceItem]) -> str | list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item.to_dict() for item in value]
+    return value

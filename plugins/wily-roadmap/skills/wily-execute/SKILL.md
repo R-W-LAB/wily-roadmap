@@ -11,11 +11,20 @@ When the user says "T03 cw로 진행해줘" or asks to process the next Wily tas
 2. Run `wily claim <id>` to record actor, timestamp, claim SHA, and progress file.
 3. Run `wily go <id>` and pass the emitted block to `custom-workflow-skillset:plan-goal-runner`.
 4. During custom-workflow, record every checkpoint in Wily with `wily cp <id> start <cp-name>` and `wily cp <id> done <cp-name>` so `.wily/tasks/<id>/progress.jsonl` drives `wily watch`.
-5. If custom-workflow already produced a status board, run `wily cp <id> import-status agent-handoffs/<slug>-status.md` to backfill checkpoint progress into `.wily/tasks/<id>/progress.jsonl`.
-6. Use `Wily-Task: <id>` / `Wily-CP: <name>` commit trailers where commits are created.
-7. Compare the result against task acceptance and report scope drift.
-8. Run `wily done <id>` only after verification.
-9. Run `wily land <id>` only after explicit user approval.
+5. Custom Workflow interface contract: custom-workflow does not update Wily by itself; the explicit `wily cp` calls close the cp automation gap between custom-workflow and the Wily task ledger.
+6. If custom-workflow already produced a status board, run `wily cp <id> import-status .wily/handoffs/<id>/status.md` to backfill checkpoint progress into `.wily/tasks/<id>/progress.jsonl`.
+   The equivalent template path is `.wily/handoffs/<task-id>/status.md`.
+7. Use the import-status path as the recovery path when checkpoint calls were missed or when a custom-workflow handoff was produced first.
+8. Use `Wily-Task: <id>` / `Wily-CP: <name>` commit trailers where commits are created.
+9. Compare the result against task acceptance and report scope drift.
+10. Run `wily done <id>` only after verification.
+11. Run `wily land <id>` only after explicit user approval.
+
+## Custom Workflow interface contract
+
+- custom-workflow does not update Wily by itself; this is the cp automation gap.
+- Use `wily cp <id> import-status` to backfill from the default `.wily/handoffs/<id>/status.md` path.
+- `.wily/handoffs/<task-id>/status.md` remains the explicit compatible path spelling in examples.
 
 ## Guardrails
 

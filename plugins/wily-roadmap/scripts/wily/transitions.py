@@ -51,6 +51,8 @@ def apply_done(task: Task, *, at: str, force: bool = False) -> Task:
 def apply_block(task: Task, *, reason: str) -> Task:
     if task.status == TaskStatus.DONE:
         raise TransitionError(f"{task.id} is done; cannot block")
+    if task.status not in {TaskStatus.READY, TaskStatus.IN_PROGRESS}:
+        raise TransitionError(f"{task.id} is {task.status.value}; cannot block")
     return replace(task, status=TaskStatus.BLOCKED, blocker=reason)
 
 

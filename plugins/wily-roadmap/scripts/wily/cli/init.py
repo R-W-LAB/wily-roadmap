@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Any
 import yaml
 
 from ..analysis import analyze_repo
+from ..agent.config import default_paths, load_config
+from ..agent.registry import register_repo
 from ..config import save_actors, save_tasks
 from ..interview import (
     Draft,
@@ -24,24 +27,60 @@ from ..interview import (
     revise_task_candidate,
     save_draft,
 )
-from ..models import Actor, Task
-from ..paths import WilyPaths, WilyRootNotFound, find_wily_root
-from ..questions import next_question, question_text, ready_for_tasks
+from ..models import Actor, Task, TaskStatus
+from ..observation import git_config_identity
+from ..paths import WilyPaths, WilyRootNotFound, find_wily_root, migrate_legacy_handoffs
+from ..questions import keys_for_mode, next_question, question_text, ready_for_tasks
 from ..transitions import DependencyError, check_dependencies
 from . import _common
 
+DESCRIPTION = "interview-driven bootstrap and brownfield adoption"
+USAGE = "usage: wily init [--new|--adopt|--quick|answer|back|revise|show|suggest|add-task|revise-task|drop-task|assign|commit|cancel|adopt-legacy]"
+HELP = "\n".join(
+    [
+        "Options:",
+        "  --new       start a greenfield project interview",
+        "  --adopt     adopt an existing project or legacy .wily state",
+        "  --quick     create a minimal greenfield project from flags",
+        "  --json      emit machine-readable output where supported",
+        "",
+        "Quick mode:",
+        "  --purpose <text>  project purpose",
+        "  --users <text>    users or stakeholders",
+        "  --success <text>  success criteria",
+        "  --actor id:email  actor identity",
+        "",
+        "Subcommands:",
+        "  answer <text>                 record an interview answer",
+        "  revise <key> <text>           revise a previous answer",
+        "  add-task <title>              add a draft task candidate",
+        "  revise-task <id> <field> ...  revise a draft task",
+        "  commit                        write the project ledger",
+        "  cancel                        discard the draft",
+    ]
+)
+
 
 def main(args: list[str]) -> int:
+    as_json = "--json" in args
+    args = [arg for arg in args if arg != "--json"]
+    if "--help" in args or "-h" in args:
+        _print_help()
+        return _common.EXIT_OK
+    if "--quick" in args:
+        return _quick(args)
     explicit_mode = "greenfield" if "--new" in args else "brownfield" if "--adopt" in args else None
     args = [arg for arg in args if arg not in {"--new", "--adopt"}]
     try:
         root = find_wily_root(Path.cwd())
     except WilyRootNotFound:
-        root = Path.cwd()
+        root = _project_root(Path.cwd())
         (root / ".wily").mkdir(parents=True, exist_ok=True)
     paths = WilyPaths(root)
+    if explicit_mode == "brownfield" and not args and (paths.wily_dir / "roadmap.yaml").exists():
+        return _adopt_v2(paths, root)
     if not args:
-        return _start(paths, root, explicit_mode)
+        return _start(paths, root, explicit_mode, as_json=as_json)
     sub, rest = args[0], args[1:]
     if sub == "answer":
         return _answer(paths, root, rest)
@@ -50,7 +89,7 @@ def main(args: list[str]) -> int:
     if sub == "revise":
         return _revise(paths, rest)
     if sub == "show":
-        return _show(paths)
+        return _show(paths, as_json=as_json)
     if sub == "suggest":
         return _suggest(paths)
     if sub == "add-task":
@@ -71,6 +110,19 @@ def main(args: list[str]) -> int:
     return _common.EXIT_USAGE
 
 
+def _project_root(cwd: Path) -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return Path(result.stdout.strip()).resolve()
+    return cwd.resolve()
+
+
 def _mode(root: Path, explicit: str | None) -> str:
     if explicit:
         return explicit
@@ -78,7 +130,7 @@ def _mode(root: Path, explicit: str | None) -> str:
     return "brownfield" if snapshot.commit_count or snapshot.readme_excerpt else "greenfield"
 
 
-def _start(paths: WilyPaths, root: Path, explicit_mode: str | None) -> int:
+def _start(paths: WilyPaths, root: Path, explicit_mode: str | None, *, as_json: bool = False) -> int:
     if paths.init_draft.exists():
         draft = load_or_init_draft(paths, mode="greenfield")
     else:
@@ -97,11 +149,17 @@ def _start(paths: WilyPaths, root: Path, explicit_mode: str | None) -> int:
                 allow_unicode=True,
             )
         save_draft(paths, draft)
-        _common.emit_text(f"wily init started (mode: {draft.mode})")
+        if not as_json:
+            _common.emit_text(f"wily init started (mode: {draft.mode})")
+    if as_json:
+        _common.emit_json(_draft_payload(draft))
+        return _common.EXIT_OK
     return _question(paths, draft)
 
 
 def _question(paths: WilyPaths, draft: Draft) -> int:
+    keys = keys_for_mode(draft.mode)
+    _common.emit_text(f"진행률 {len([key for key in keys if key in draft.answers])}/{len(keys)} · 취소: wily init cancel")
     if draft.mode == "brownfield" and "analysis_confirm" not in draft.answers:
         _common.emit_text("=== 자동 분석 결과 ===")
         _common.emit_text(draft.answers.get("_analysis", ""))
@@ -111,6 +169,56 @@ def _question(paths: WilyPaths, draft: Draft) -> int:
         return _common.EXIT_OK
     _common.emit_text(f"[{key}] {question_text(key)}")
     return _common.EXIT_OK
+
+
+def _quick(args: list[str]) -> int:
+    try:
+        root = _project_root(Path.cwd())
+    except Exception:
+        root = Path.cwd().resolve()
+    paths = WilyPaths(root)
+    values = _flag_values(args)
+    purpose = values.get("--purpose")
+    users = values.get("--users")
+    success = values.get("--success")
+    actor_value = values.get("--actor")
+    if not purpose or not users or not success:
+        _common.emit_error("usage: wily init --quick --purpose <text> --users <text> --success <text> [--actor id:email]")
+        return _common.EXIT_USAGE
+    draft = Draft(mode="greenfield")
+    draft.answers = {
+        "purpose": purpose,
+        "users": users,
+        "success": success,
+        "non_goals": "",
+        "actors_setup": _actor_setup_from_quick(actor_value),
+    }
+    draft.history = ["purpose", "users", "success", "non_goals", "actors_setup"]
+    save_draft(paths, draft)
+    return _commit(paths, root)
+
+
+def _actor_setup_from_quick(value: str | None) -> str:
+    if not value:
+        return "wily Wily"
+    actor_id, _, email = value.partition(":")
+    return f"{actor_id} {actor_id}, emails={email}" if email else actor_id
+
+
+def _flag_values(args: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token.startswith("--") and token != "--quick" and index + 1 < len(args):
+            values[token] = args[index + 1]
+            index += 1
+        index += 1
+    return values
+
+
+def _print_help() -> None:
+    _common.print_command_help("init")
 
 
 def _answer(paths: WilyPaths, root: Path, args: list[str]) -> int:
@@ -156,11 +264,17 @@ def _revise(paths: WilyPaths, args: list[str]) -> int:
     return _common.EXIT_OK
 
 
-def _show(paths: WilyPaths) -> int:
+def _show(paths: WilyPaths, *, as_json: bool = False) -> int:
     if not paths.init_draft.exists():
+        if as_json:
+            _common.emit_json({"draft": None})
+            return _common.EXIT_OK
         _common.emit_text("(no draft in progress)")
         return _common.EXIT_OK
     draft = load_or_init_draft(paths, mode="greenfield")
+    if as_json:
+        _common.emit_json(_draft_payload(draft))
+        return _common.EXIT_OK
     _common.emit_text(f"mode: {draft.mode}")
     for key in draft.history:
         _common.emit_text(f"  {key}: {draft.answers[key]}")
@@ -169,6 +283,16 @@ def _show(paths: WilyPaths) -> int:
         for task in draft.task_candidates:
             _common.emit_text(f"  {task['id']} {task['title']!r} assignee={task.get('assignee') or '-'}")
     return _common.EXIT_OK
+
+
+def _draft_payload(draft: Draft) -> dict[str, Any]:
+    return {
+        "mode": draft.mode,
+        "answers": draft.answers,
+        "history": draft.history,
+        "task_candidates": draft.task_candidates,
+        "current_question": next_question(draft),
+    }
 
 
 def _suggest(paths: WilyPaths) -> int:
@@ -259,9 +383,13 @@ def _commit(paths: WilyPaths, root: Path) -> int:
     save_actors(paths, actors)
     _write_project(paths, draft)
     _write_agent_instruction_files(root)
+    moved_handoffs = migrate_legacy_handoffs(paths)
     discard_draft(paths)
     _common.emit_text(f"init committed: {len(tasks)} task(s), {len(actors)} actor(s)")
     _common.emit_text("agent instructions updated: AGENTS.md, CLAUDE.md")
+    if moved_handoffs:
+        _common.emit_text(f"handoffs migrated: {moved_handoffs} file(s)")
+    _best_effort_agent_register(root)
     return _common.EXIT_OK
 
 
@@ -289,6 +417,72 @@ def _adopt_legacy(paths: WilyPaths) -> int:
         shutil.move(str(child), str(dest / child.name))
     _common.emit_text(f"legacy .wily/ archived to {dest.relative_to(paths.root)}")
     return _common.EXIT_OK
+
+
+def _adopt_v2(paths: WilyPaths, root: Path) -> int:
+    roadmap_path = paths.wily_dir / "roadmap.yaml"
+    status_path = paths.wily_dir / "status.md"
+    try:
+        legacy = yaml.safe_load(roadmap_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        _common.emit_error(f"cannot read legacy roadmap.yaml: {exc}")
+        return _common.EXIT_FAILURE
+    status_text = status_path.read_text(encoding="utf-8", errors="replace") if status_path.exists() else ""
+    tasks = _tasks_from_legacy(legacy)
+    if not tasks:
+        _common.emit_error("legacy roadmap.yaml has no stages to migrate")
+        return _common.EXIT_FAILURE
+    archive_result = _adopt_legacy(paths)
+    if archive_result != _common.EXIT_OK:
+        return archive_result
+    title = str(legacy.get("goal") or "Wily Roadmap").strip() or "Wily Roadmap"
+    save_tasks(paths, title, tasks)
+    email, name = git_config_identity(root)
+    save_actors(paths, [Actor(id="wily", display=name or "Wily", git_author_emails=[email] if email else [], git_author_names=[name] if name else [])])
+    if status_text.strip():
+        paths.project_md.write_text(status_text, encoding="utf-8")
+    else:
+        paths.project_md.write_text(f"# {title}\n", encoding="utf-8")
+    _common.emit_text(f"legacy .wily adopted into v3: {len(tasks)} task(s)")
+    return _common.EXIT_OK
+
+
+def _tasks_from_legacy(legacy: dict[str, Any]) -> list[Task]:
+    stages = legacy.get("stages") or []
+    id_map: dict[str, str] = {}
+    for index, stage in enumerate(stages, start=1):
+        legacy_id = str((stage or {}).get("id") or f"s{index:02d}")
+        id_map[legacy_id] = f"T{index:02d}"
+    tasks: list[Task] = []
+    for index, stage in enumerate(stages, start=1):
+        if not isinstance(stage, dict):
+            continue
+        legacy_id = str(stage.get("id") or f"s{index:02d}")
+        status = _legacy_status(str(stage.get("status") or "ready"))
+        path = str(stage.get("path") or "").strip()
+        scope = [path + "/**"] if path else []
+        task = Task(
+            id=id_map[legacy_id],
+            title=str(stage.get("title") or legacy_id),
+            intent=str(stage.get("task") or ""),
+            scope=scope,
+            depends_on=[id_map[dep] for dep in stage.get("depends_on") or [] if dep in id_map],
+            status=status,
+            assignee=stage.get("owner") or "wily",
+            done_at="legacy" if status == TaskStatus.DONE else None,
+            blocker=stage.get("blocker") if status == TaskStatus.BLOCKED else None,
+        )
+        tasks.append(task)
+    return tasks
+
+
+def _legacy_status(value: str) -> TaskStatus:
+    normalized = value.lower()
+    if normalized in {"done", "canceled", "cancelled", "superseded"}:
+        return TaskStatus.DONE
+    if normalized == "blocked":
+        return TaskStatus.BLOCKED
+    return TaskStatus.READY
 
 
 def _parse_actors(text: str) -> list[Actor]:
@@ -329,6 +523,9 @@ def _write_project(paths: WilyPaths, draft: Draft) -> None:
     paths.project_md.write_text("\n".join(lines), encoding="utf-8")
 
 
+WILY_MANAGED_START = "<!-- wily-roadmap:start -->"
+WILY_MANAGED_END = "<!-- wily-roadmap:end -->"
+
 AGENT_INSTRUCTION_SECTIONS = """## Wily Roadmap
 
 - Treat `.wily/` as the local project/task ledger.
@@ -350,12 +547,39 @@ def _write_agent_instruction_files(root: Path) -> None:
         _upsert_agent_instruction_sections(root / name)
 
 
+def _best_effort_agent_register(root: Path) -> None:
+    try:
+        agent_paths = default_paths()
+        config = load_config(agent_paths.config_path)
+        if not config.repo:
+            return
+        register_repo(root, config.repo, agent_paths.registry_path)
+    except Exception as exc:
+        _common.emit_error(f"wily-agent register skipped: {exc}; run `wily agent register` manually.")
+
+
 def _upsert_agent_instruction_sections(path: Path) -> None:
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    cleaned = _remove_markdown_section(existing, "Wily Roadmap")
-    cleaned = _remove_markdown_section(cleaned, "Agent Behavior").strip()
-    parts = [part for part in (cleaned, AGENT_INSTRUCTION_SECTIONS.strip()) if part]
+    managed = f"{WILY_MANAGED_START}\n{AGENT_INSTRUCTION_SECTIONS.strip()}\n{WILY_MANAGED_END}"
+    if WILY_MANAGED_START in existing and WILY_MANAGED_END in existing:
+        cleaned = _replace_managed_block(existing, managed).strip()
+    else:
+        cleaned = _remove_legacy_managed_sections(existing).strip()
+    parts = [part for part in (cleaned, managed) if part]
     path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+
+
+def _replace_managed_block(text: str, replacement: str) -> str:
+    before, _, rest = text.partition(WILY_MANAGED_START)
+    _old, _, after = rest.partition(WILY_MANAGED_END)
+    return before.rstrip() + "\n\n" + replacement + "\n" + after.lstrip("\n")
+
+
+def _remove_legacy_managed_sections(text: str) -> str:
+    if "Treat `.wily/` as the local project/task ledger." not in text:
+        return text
+    cleaned = _remove_markdown_section(text, "Wily Roadmap")
+    return _remove_markdown_section(cleaned, "Agent Behavior")
 
 
 def _remove_markdown_section(text: str, title: str) -> str:

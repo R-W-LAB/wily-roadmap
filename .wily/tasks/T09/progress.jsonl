@@ -1,0 +1,10 @@
+{"ts": "2026-05-19T02:39:40Z", "actor": "wily", "cp": "planning", "event": "start"}
+{"ts": "2026-05-19T02:42:32Z", "actor": "wily", "cp": "planning", "event": "done"}
+{"ts": "2026-05-19T02:42:32Z", "actor": "wily", "cp": "red-tests", "event": "start"}
+{"ts": "2026-05-19T02:43:32Z", "actor": "wily", "cp": "red-tests", "event": "done"}
+{"ts": "2026-05-19T02:43:32Z", "actor": "wily", "cp": "implementation", "event": "start"}
+{"ts": "2026-05-19T02:46:35Z", "actor": "wily", "cp": "implementation", "event": "done"}
+{"ts": "2026-05-19T02:46:35Z", "actor": "wily", "cp": "docs-surface", "event": "start"}
+{"ts": "2026-05-19T02:47:26Z", "actor": "wily", "cp": "docs-surface", "event": "done"}
+{"ts": "2026-05-19T02:47:26Z", "actor": "wily", "cp": "final-verification", "event": "start"}
+{"ts": "2026-05-19T02:51:24Z", "actor": "wily", "cp": "final-verification", "event": "done"}

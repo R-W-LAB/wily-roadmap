@@ -9,8 +9,25 @@ import sys
 import time
 from pathlib import Path
 
+from ..paths import WilyPaths, WilyRootNotFound, find_wily_root
 from . import _common
 from .status import main as status_main
+
+DESCRIPTION = "poll and render the project status view"
+USAGE = "usage: wily watch [--once] [--ui <auto|ascii>] [--compact] [--show-timeline] [--hide-log] [--interval <seconds>] [--dry-run-pane] [--json]"
+HELP = "\n".join(
+    [
+        "Options:",
+        "  --once          render one snapshot and exit",
+        "  --ui <mode>     choose renderer mode",
+        "  --compact       reduce output density",
+        "  --show-timeline include checkpoint timeline",
+        "  --hide-log      hide observed git log entries",
+        "  --interval <n>  polling interval in seconds",
+        "  --dry-run-pane  print the tmux pane command",
+        "  --json          pass JSON output through status",
+    ]
+)
 
 
 def main(args: list[str]) -> int:
@@ -26,7 +43,7 @@ def main(args: list[str]) -> int:
             return _common.EXIT_USAGE
         print(format_shell_command(tmux_watch_command(Path.cwd(), args)))
         return _common.EXIT_OK
-    once = "--once" in args
+    once = "--once" in args or "--json" in args
     interval = _interval(args)
     if interval is None:
         return _common.EXIT_USAGE
@@ -45,13 +62,32 @@ def main(args: list[str]) -> int:
         _common.emit_error("wily watch needs an interactive terminal outside tmux.")
         _common.emit_error("For a one-shot text preview, run: wily watch --once --ui ascii")
         return _common.EXIT_FAILURE
+    last_mtime: int | None = None
     while True:
-        print("\033[2J\033[H", end="")
-        status_main(status_args)
+        current_mtime = touch_mtime(Path.cwd())
+        if should_redraw(last_mtime, current_mtime):
+            print("\033[2J\033[H", end="")
+            status_main(status_args)
+            last_mtime = current_mtime
         try:
             time.sleep(interval)
         except KeyboardInterrupt:
             return _common.EXIT_OK
+
+
+def touch_mtime(start: Path) -> int:
+    try:
+        paths = WilyPaths(find_wily_root(start))
+    except WilyRootNotFound:
+        return 0
+    try:
+        return paths.touch_file.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def should_redraw(last_mtime: int | None, current_mtime: int) -> bool:
+    return last_mtime is None or current_mtime != last_mtime
 
 
 def _interval(args: list[str]) -> float | None:

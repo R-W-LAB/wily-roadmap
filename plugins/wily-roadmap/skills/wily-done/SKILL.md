@@ -10,13 +10,17 @@ Mark an in-progress task done and write `.wily/tasks/<id>/result.md`.
 ## Internal Command
 
 ```bash
-python3 <plugin-root>/scripts/wily.py done <id> [--note <text>|--observed|--force]
+python3 <plugin-root>/scripts/wily.py done <id> [--note <text>|--observed|--force|--add-scope|--stub-drift]
 ```
 
 ## Behavior
 
 - State-changing: flips status to done and writes result metadata.
 - Does not run a verification gate; the user's command is the closure signal.
+- Before marking done, compares files changed since `claim_sha` against task scope.
+- If scope drift exists, default behavior blocks done and asks the user to choose either `--add-scope` or `--stub-drift`.
+- `--add-scope` records outside-scope files on the current task before closing it.
+- `--stub-drift` creates or reuses a `drift: <summary>` helper task so the drift is tracked without duplicate stubs.
 
 ## Response Style
 

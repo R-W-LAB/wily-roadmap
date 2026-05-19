@@ -60,5 +60,12 @@ def save_actors(paths: WilyPaths, actors: Iterable[Actor]) -> None:
     )
 
 
+def upsert_actor(paths: WilyPaths, actor: Actor) -> list[Actor]:
+    actors = [item for item in load_actors(paths) if item.id != actor.id]
+    actors.append(actor)
+    save_actors(paths, actors)
+    return actors
+
+
 def repo_mode(paths: WilyPaths) -> str:
     return "collab" if len(load_actors(paths)) >= 2 else "solo"
