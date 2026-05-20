@@ -14,6 +14,7 @@ From the plugin root:
 ./wily go T01
 ./wily done T01
 ./wily watch --once
+./wily workspace status
 ./wily agent check
 ```
 
@@ -42,12 +43,43 @@ Wily v3 stores durable project state under `.wily/`:
 `custom-workflow-skillset:plan-goal-runner`. Wily does not invoke external
 runners directly.
 
+## Workspace Manifest
+
+Use `wily workspace` from a parent coordination directory when you want one
+read-only view across multiple child Wily repos. The parent file can be
+`wily-workspace.yaml` or `.wily-workspace.yaml`.
+
+```yaml
+schema: wily-workspace-v1
+title: Wily Plugin Workspace
+repos:
+  - id: wily-roadmap
+    path: ./wily-roadmap
+  - id: wily-board
+    path: ./wily-board
+```
+
+The manifest is not a source of truth; each child repo keeps its own
+`.wily/tasks.yaml`. `wily workspace init` writes only the manifest and does not create parent `.wily/`.
+
+Useful commands:
+
+```bash
+wily workspace init --repo wily-roadmap=./wily-roadmap --repo wily-board=./wily-board --title "Wily Plugin Workspace"
+wily workspace show-config --json
+wily workspace status --json
+wily workspace next
+wily workspace watch --once
+```
+
 ## Wily Agent
 
 The plugin includes the official bundled `wily-agent` daemon for Wily Board v3.
 It watches registered `.wily` repositories, builds local-first task snapshots,
 and sends best-effort snapshots and heartbeats to Wily Board when local config
-is present.
+is present. As of 2026-05-20, the local `wily-board` repo is deleted for a
+fresh rebuild, so Board sync is unavailable until a rebuilt Board URL is
+configured.
 
 Typical onboarding:
 
@@ -68,9 +100,10 @@ wily agent run --once --offline-ok
 
 `wily agent stop` stops the macOS launchd daemon. `wily agent configure --secret`
 remains available for legacy signed `/api/live/events` compatibility, but the
-Board v3 path uses the token from `wily agent login`. Missing agent config,
-Board downtime, and invalid tokens are best-effort agent failures; normal Wily
-task commands continue to use local `.wily/` state.
+Board v3 path uses the token from `wily agent login` after the rebuilt Board
+exists. Missing agent config, Board downtime, invalid tokens, or the current
+Board rebuild gap are best-effort agent failures; normal Wily task commands
+continue to use local `.wily/` state.
 
 `live-*` commands are not a Wily Board v3 reflection mechanism. Stale local
 hooks may still call `live-worked --from-hook`; v3 keeps that form as a no-op so

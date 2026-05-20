@@ -26,6 +26,7 @@ COMMANDS = (
     "land",
     "watch",
     "status",
+    "workspace",
     "doctor",
 )
 

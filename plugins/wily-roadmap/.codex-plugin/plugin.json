@@ -31,6 +31,7 @@
       "$wily-init: start or adopt a v3 project",
       "$wily-status: show current v3 task state",
       "$wily-watch: watch v3 task state",
+      "$wily-workspace: show manifest-only multi-repo task state",
       "$wily-next: show the next ready task",
       "$wily-claim <id>: claim a task",
       "$wily-go <id>: emit custom-workflow goal text",

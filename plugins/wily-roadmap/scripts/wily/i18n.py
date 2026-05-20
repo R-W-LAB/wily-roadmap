@@ -22,6 +22,7 @@ MESSAGES = {
         "description.land": "Wily trailer가 포함된 태스크 변경 커밋",
         "description.watch": "프로젝트 상태 화면 폴링 렌더링",
         "description.status": "프로젝트 상태 스냅샷 출력",
+        "description.workspace": "manifest 기반 multi-repo workspace 상태 출력",
         "description.agent": "번들 heartbeat daemon 설치 및 관리",
         "description.doctor": "로컬 Wily 상태 헬스체크",
         "options": "옵션:",

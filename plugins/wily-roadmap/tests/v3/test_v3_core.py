@@ -655,6 +655,329 @@ class CoreModelTest(unittest.TestCase):
             with self.assertRaises(WilyRootNotFound):
                 find_wily_root(root.parent)
 
+    def test_workspace_manifest_discovery_prefers_visible_manifest(self) -> None:
+        from wily.workspace import discover_workspace_manifest, load_workspace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            roadmap = parent / "wily-roadmap"
+            board = parent / "wily-board"
+            roadmap.mkdir()
+            board.mkdir()
+            (parent / ".wily-workspace.yaml").write_text(
+                "schema: wily-workspace-v1\ntitle: Hidden\nrepos: []\n",
+                encoding="utf-8",
+            )
+            (parent / "wily-workspace.yaml").write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Wily Plugin Workspace",
+                        "repos:",
+                        "  - id: wily-roadmap",
+                        "    path: ./wily-roadmap",
+                        "  - id: wily-board",
+                        "    path: ./wily-board",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            nested = parent / "nested" / "deep"
+            nested.mkdir(parents=True)
+
+            manifest = discover_workspace_manifest(nested)
+            workspace = load_workspace(manifest)
+
+            self.assertEqual(manifest, (parent / "wily-workspace.yaml").resolve())
+            self.assertEqual(workspace.title, "Wily Plugin Workspace")
+            self.assertEqual([repo.id for repo in workspace.repos], ["wily-roadmap", "wily-board"])
+            self.assertEqual(workspace.repos[0].path, roadmap.resolve())
+            self.assertEqual(workspace.repos[1].path, board.resolve())
+
+    def test_workspace_manifest_discovery_accepts_dotfile_fallback(self) -> None:
+        from wily.workspace import discover_workspace_manifest, load_workspace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            (parent / "repo").mkdir()
+            (parent / ".wily-workspace.yaml").write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Dotfile Workspace",
+                        "repos:",
+                        "  - id: repo",
+                        "    path: ./repo",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            manifest = discover_workspace_manifest(parent / "child")
+            workspace = load_workspace(manifest)
+
+            self.assertEqual(manifest, (parent / ".wily-workspace.yaml").resolve())
+            self.assertEqual(workspace.title, "Dotfile Workspace")
+            self.assertEqual(workspace.repos[0].path, (parent / "repo").resolve())
+
+    def test_workspace_snapshot_summarizes_child_repos_and_invalid_repos(self) -> None:
+        from wily.workspace import load_workspace, workspace_snapshot
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            roadmap = parent / "wily-roadmap"
+            board = parent / "wily-board"
+            roadmap.mkdir()
+            board.mkdir()
+            save_tasks(
+                WilyPaths(roadmap),
+                "Roadmap",
+                [
+                    Task(id="R01", title="Done", status=TaskStatus.DONE),
+                    Task(id="R02", title="Active", status=TaskStatus.IN_PROGRESS, actor="wily"),
+                    Task(id="R03", title="Ready", status=TaskStatus.READY, priority=1),
+                    Task(id="R04", title="Waiting", status=TaskStatus.READY, depends_on=["R02"], priority=2),
+                    Task(id="R05", title="Blocked", status=TaskStatus.BLOCKED, blocker="needs API"),
+                ],
+            )
+            save_actors(WilyPaths(roadmap), [Actor(id="wily", display="Wily")])
+            save_tasks(
+                WilyPaths(board),
+                "Board",
+                [
+                    Task(id="B01", title="Board ready", status=TaskStatus.READY),
+                    Task(id="B02", title="Board blocked", status=TaskStatus.BLOCKED, blocker="needs design"),
+                ],
+            )
+            manifest = parent / "wily-workspace.yaml"
+            manifest.write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Wily Plugin Workspace",
+                        "repos:",
+                        "  - id: wily-roadmap",
+                        "    path: ./wily-roadmap",
+                        "  - id: wily-board",
+                        "    path: ./wily-board",
+                        "  - id: missing",
+                        "    path: ./missing",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = workspace_snapshot(load_workspace(manifest))
+            repos = {repo["id"]: repo for repo in snapshot["repos"]}
+
+            self.assertEqual(snapshot["title"], "Wily Plugin Workspace")
+            self.assertEqual(repos["wily-roadmap"]["project_title"], "Roadmap")
+            self.assertEqual(repos["wily-roadmap"]["mode"], "solo")
+            self.assertEqual(
+                repos["wily-roadmap"]["progress"],
+                {"total": 5, "done": 1, "in_progress": 1, "ready": 2, "blocked": 1, "waiting": 1, "percent_done": 20},
+            )
+            self.assertEqual([task["id"] for task in repos["wily-roadmap"]["in_progress_tasks"]], ["R02"])
+            self.assertEqual([task["id"] for task in repos["wily-roadmap"]["next_tasks"]], ["R03"])
+            self.assertEqual([task["id"] for task in repos["wily-roadmap"]["waiting_tasks"]], ["R04"])
+            self.assertEqual(repos["wily-roadmap"]["blocked_tasks"][0]["blocker"], "needs API")
+            self.assertEqual([task["id"] for task in repos["wily-board"]["next_tasks"]], ["B01"])
+            self.assertIn("error", repos["missing"])
+
+    def test_workspace_next_aggregates_ready_tasks_without_claiming(self) -> None:
+        from wily.workspace import load_workspace, workspace_next_tasks
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            roadmap = parent / "wily-roadmap"
+            board = parent / "wily-board"
+            roadmap.mkdir()
+            board.mkdir()
+            save_tasks(WilyPaths(roadmap), "Roadmap", [Task(id="R01", title="Roadmap ready", status=TaskStatus.READY)])
+            save_tasks(WilyPaths(board), "Board", [Task(id="B01", title="Board ready", status=TaskStatus.READY)])
+            manifest = parent / "wily-workspace.yaml"
+            manifest.write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Wily Plugin Workspace",
+                        "repos:",
+                        "  - id: wily-roadmap",
+                        "    path: ./wily-roadmap",
+                        "  - id: wily-board",
+                        "    path: ./wily-board",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            tasks = workspace_next_tasks(load_workspace(manifest))
+
+            self.assertEqual([(task["repo_id"], task["id"]) for task in tasks], [("wily-roadmap", "R01"), ("wily-board", "B01")])
+            self.assertEqual(load_tasks(WilyPaths(roadmap))[1][0].status, TaskStatus.READY)
+            self.assertEqual(load_tasks(WilyPaths(board))[1][0].status, TaskStatus.READY)
+
+    def test_workspace_cli_init_status_next_show_config_and_watch_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            roadmap = parent / "wily-roadmap"
+            board = parent / "wily-board"
+            roadmap.mkdir()
+            board.mkdir()
+            save_tasks(WilyPaths(roadmap), "Roadmap", [Task(id="R01", title="Roadmap ready", status=TaskStatus.READY)])
+            save_tasks(WilyPaths(board), "Board", [Task(id="B01", title="Board ready", status=TaskStatus.READY)])
+
+            init = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "workspace",
+                    "init",
+                    "--repo",
+                    "wily-roadmap=./wily-roadmap",
+                    "--repo",
+                    "wily-board=./wily-board",
+                    "--title",
+                    "Wily Plugin Workspace",
+                ],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(init.returncode, 0, init.stderr)
+            self.assertTrue((parent / "wily-workspace.yaml").exists())
+            self.assertFalse((parent / ".wily").exists())
+
+            show_config = subprocess.run(
+                [sys.executable, str(SCRIPT), "workspace", "show-config", "--json"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(show_config.returncode, 0, show_config.stderr)
+            config_payload = json.loads(show_config.stdout)
+            self.assertEqual(config_payload["schema"], "wily-workspace-v1")
+            self.assertEqual([repo["id"] for repo in config_payload["repos"]], ["wily-roadmap", "wily-board"])
+
+            status = subprocess.run(
+                [sys.executable, str(SCRIPT), "workspace", "status", "--json"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_payload = json.loads(status.stdout)
+            self.assertEqual(status_payload["title"], "Wily Plugin Workspace")
+            self.assertEqual([repo["id"] for repo in status_payload["repos"]], ["wily-roadmap", "wily-board"])
+
+            next_result = subprocess.run(
+                [sys.executable, str(SCRIPT), "workspace", "next"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(next_result.returncode, 0, next_result.stderr)
+            self.assertIn("wily-roadmap R01", next_result.stdout)
+            self.assertIn("wily-board B01", next_result.stdout)
+
+            watch = subprocess.run(
+                [sys.executable, str(SCRIPT), "workspace", "watch", "--once"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(watch.returncode, 0, watch.stderr)
+            self.assertIn("Wily Plugin Workspace", watch.stdout)
+            self.assertIn("Roadmap", watch.stdout)
+            self.assertFalse((parent / ".wily").exists())
+
+    def test_workspace_watch_tracks_child_touch_mtimes_and_rejects_zero_interval(self) -> None:
+        from wily.cli import workspace as workspace_cmd
+        from wily.workspace import load_workspace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            roadmap = parent / "wily-roadmap"
+            board = parent / "wily-board"
+            roadmap.mkdir()
+            board.mkdir()
+            save_tasks(WilyPaths(roadmap), "Roadmap", [Task(id="R01", title="Ready", status=TaskStatus.READY)])
+            save_tasks(WilyPaths(board), "Board", [Task(id="B01", title="Ready", status=TaskStatus.READY)])
+            WilyPaths(roadmap).touch_file.touch()
+            WilyPaths(board).touch_file.touch()
+            manifest = parent / "wily-workspace.yaml"
+            manifest.write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Wily Plugin Workspace",
+                        "repos:",
+                        "  - id: wily-roadmap",
+                        "    path: ./wily-roadmap",
+                        "  - id: wily-board",
+                        "    path: ./wily-board",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config = load_workspace(manifest)
+
+            first = workspace_cmd.workspace_touch_mtimes(config)
+            WilyPaths(board).touch_file.write_text("changed", encoding="utf-8")
+            second = workspace_cmd.workspace_touch_mtimes(config)
+
+            self.assertEqual(len(first), 2)
+            self.assertNotEqual(first, second)
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                self.assertEqual(workspace_cmd._interval(["--interval", "0"]), None)
+            self.assertIn("--interval must be positive", stderr.getvalue())
+
+    def test_workspace_next_reports_invalid_child_repos_without_hiding_valid_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            roadmap = parent / "wily-roadmap"
+            roadmap.mkdir()
+            save_tasks(WilyPaths(roadmap), "Roadmap", [Task(id="R01", title="Roadmap ready", status=TaskStatus.READY)])
+            (parent / "wily-workspace.yaml").write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Wily Plugin Workspace",
+                        "repos:",
+                        "  - id: wily-roadmap",
+                        "    path: ./wily-roadmap",
+                        "  - id: missing",
+                        "    path: ./missing",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "workspace", "next"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("wily-roadmap R01", result.stdout)
+            self.assertIn("[missing] ERROR", result.stderr)
+
     def test_watch_renderer_keeps_rich_pipeline_shape(self) -> None:
         output = render_watch(
             project_title="Demo",

@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MARKETPLACE = ROOT.parents[1] / ".agents" / "plugins" / "marketplace.json"
 
-COMMANDS = {"init", "next", "claim", "go", "done", "block", "replan", "land", "watch", "status", "cp", "agent"}
+COMMANDS = {"init", "next", "claim", "go", "done", "block", "replan", "land", "watch", "status", "cp", "agent", "workspace"}
 SKILLS = {f"wily-{name}" for name in COMMANDS} | {"wily-execute"}
 
 
@@ -70,6 +70,22 @@ class V3SurfaceTest(unittest.TestCase):
         self.assertIn("snapshots and heartbeats", readme)
         self.assertIn("live-*` commands are not a Wily Board v3 reflection mechanism", readme)
         self.assertIn("wily cp", readme)
+
+    def test_workspace_surface_documents_manifest_only_contract(self) -> None:
+        command = (ROOT / "commands" / "workspace.md").read_text(encoding="utf-8")
+        skill = (ROOT / "skills" / "wily-workspace" / "SKILL.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        prompt = "\n".join(json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))["interface"]["defaultPrompt"])
+
+        for text in (command, skill, readme):
+            with self.subTest(path="workspace-contract"):
+                self.assertIn("wily-workspace.yaml", text)
+                self.assertIn(".wily-workspace.yaml", text)
+                self.assertIn("manifest is not a source of truth", text)
+                self.assertIn("does not create parent `.wily/`", text)
+                self.assertIn("wily workspace status", text)
+                self.assertIn("wily workspace next", text)
+        self.assertIn("$wily-workspace", prompt)
 
     def test_replan_skill_routes_natural_language_work_to_task_addition(self) -> None:
         replan = (ROOT / "skills" / "wily-replan" / "SKILL.md").read_text(encoding="utf-8")
