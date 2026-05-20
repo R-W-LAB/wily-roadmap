@@ -1,0 +1,1541 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="rock" data-mode="day">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wily Board — 에이전트 작업 감독 보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   Wily Board — UI mockup
+   data-theme: rock (Julirsia / 록맨) | bass (airmang / 포르테)
+   data-mode:  day | night
+   ============================================================ */
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --r-sm:6px; --r-md:9px; --r-lg:13px; --r-pill:999px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px;
+  --sidebar-w:248px; --topbar-h:58px; --panel-w:380px;
+  --font-body:'IBM Plex Sans KR',sans-serif;
+  --font-mono:'IBM Plex Mono',monospace;
+  --font-disp:'Chakra Petch',sans-serif;
+  --st-working:var(--primary);
+  --ease:cubic-bezier(.32,.72,.36,1);
+}
+
+/* ---- status colors per mode ---- */
+[data-mode="day"]{
+  --st-waiting:#7c8ca0; --st-verifying:#cf8409; --st-blocked:#d33b3b;
+  --st-done:#1d9b56; --st-stale:#9aa7b6;
+}
+[data-mode="night"]{
+  --st-waiting:#8493a8; --st-verifying:#f0a93a; --st-blocked:#ff5f5f;
+  --st-done:#36c279; --st-stale:#5f6d80;
+}
+
+/* ---- ROCK · DAY (Julirsia / 록맨, 청명한 히어로의 아침) ---- */
+[data-theme="rock"][data-mode="day"]{
+  --bg:#e7eff8; --bg-grid:rgba(14,111,214,.05);
+  --surface:#ffffff; --surface-2:#eef4fb; --surface-3:#e2ecf6;
+  --border:#d5e1ee; --border-2:#bdd1e4;
+  --text:#0d2138; --text-dim:#54697f; --text-mute:#8a9cb0;
+  --primary:#0e6fd6; --primary-hi:#3f97e6; --primary-ink:#ffffff;
+  --primary-soft:#dceaf9; --primary-line:rgba(14,111,214,.40);
+  --accent:#e2920a;
+  --topbar:rgba(255,255,255,.86); --shadow:0 1px 2px rgba(13,33,56,.07),0 10px 26px rgba(13,33,56,.10);
+  --lift:0 3px 8px rgba(13,33,56,.10),0 20px 44px rgba(13,33,56,.17);
+  --glow:0 0 0 4px rgba(14,111,214,.14);
+  color-scheme:light;
+}
+/* ---- ROCK · NIGHT (야간 스테이지의 블루봄버) ---- */
+[data-theme="rock"][data-mode="night"]{
+  --bg:#091224; --bg-grid:rgba(70,168,255,.055);
+  --surface:#10203a; --surface-2:#172a48; --surface-3:#1e3556;
+  --border:#264266; --border-2:#33567e;
+  --text:#e9f2fd; --text-dim:#92aacb; --text-mute:#637c9c;
+  --primary:#46a8ff; --primary-hi:#79c2ff; --primary-ink:#06121f;
+  --primary-soft:#15304f; --primary-line:rgba(70,168,255,.50);
+  --accent:#ffcb45;
+  --topbar:rgba(13,28,50,.84); --shadow:0 1px 2px rgba(0,0,0,.5),0 12px 30px rgba(0,0,0,.5);
+  --lift:0 3px 8px rgba(0,0,0,.55),0 22px 50px rgba(0,0,0,.62);
+  --glow:0 0 0 4px rgba(70,168,255,.22);
+  color-scheme:dark;
+}
+/* ---- BASS · DAY (주간의 와일리 연구소, 냉정한 강철) ---- */
+[data-theme="bass"][data-mode="day"]{
+  --bg:#e6e4ec; --bg-grid:rgba(123,52,224,.05);
+  --surface:#faf9fc; --surface-2:#f0eef5; --surface-3:#e5e1ee;
+  --border:#d9d4e2; --border-2:#c4bcd4;
+  --text:#1b1626; --text-dim:#655d76; --text-mute:#928aa3;
+  --primary:#7b34e0; --primary-hi:#9a5cee; --primary-ink:#ffffff;
+  --primary-soft:#e9e0fa; --primary-line:rgba(123,52,224,.40);
+  --accent:#bd820a;
+  --topbar:rgba(250,249,252,.87); --shadow:0 1px 2px rgba(27,22,38,.08),0 10px 26px rgba(27,22,38,.13);
+  --lift:0 3px 8px rgba(27,22,38,.12),0 20px 44px rgba(27,22,38,.20);
+  --glow:0 0 0 4px rgba(123,52,224,.14);
+  color-scheme:light;
+}
+/* ---- BASS · NIGHT (어둠 속 라이벌의 보랏빛) ---- */
+[data-theme="bass"][data-mode="night"]{
+  --bg:#0b0912; --bg-grid:rgba(163,102,242,.06);
+  --surface:#171420; --surface-2:#1f1b2c; --surface-3:#272237;
+  --border:#322c45; --border-2:#473e63;
+  --text:#ece8f5; --text-dim:#9890ac; --text-mute:#6a627e;
+  --primary:#a366f2; --primary-hi:#c08cff; --primary-ink:#0a0712;
+  --primary-soft:#241d3a; --primary-line:rgba(163,102,242,.52);
+  --accent:#f0b429;
+  --topbar:rgba(16,13,24,.84); --shadow:0 1px 2px rgba(0,0,0,.55),0 12px 30px rgba(0,0,0,.55);
+  --lift:0 3px 8px rgba(0,0,0,.6),0 22px 50px rgba(0,0,0,.66);
+  --glow:0 0 0 4px rgba(163,102,242,.24);
+  color-scheme:dark;
+}
+
+html,body{height:100%; overflow-x:clip}
+body{
+  font-family:var(--font-body);
+  background:var(--bg);
+  color:var(--text);
+  font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  transition:background-color .4s var(--ease),color .4s var(--ease);
+  background-image:
+    linear-gradient(var(--bg-grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--bg-grid) 1px,transparent 1px);
+  background-size:34px 34px;
+}
+.transy{transition:background-color .4s var(--ease),color .4s var(--ease),border-color .4s var(--ease),box-shadow .4s var(--ease)}
+
+/* ---------- typography helpers ---------- */
+.eyebrow{
+  font-family:var(--font-disp); font-weight:600; font-size:11px;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--text-mute);
+}
+.mono{font-family:var(--font-mono)}
+.disp{font-family:var(--font-disp)}
+
+/* ---------- topbar ---------- */
+.topbar{
+  position:sticky; top:0; z-index:40; height:var(--topbar-h);
+  display:flex; align-items:center; gap:var(--sp-4);
+  padding:0 var(--sp-5);
+  background:var(--topbar); backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--border);
+}
+.brand{display:flex; align-items:center; gap:10px; flex-shrink:0}
+.brand-mark{
+  width:30px; height:30px; border-radius:8px; flex-shrink:0;
+  background:linear-gradient(135deg,var(--primary),var(--primary-hi));
+  display:grid; place-items:center; box-shadow:var(--glow);
+}
+.brand-mark::before{
+  content:""; width:11px; height:11px;
+  background:var(--primary-ink); rotate:45deg; border-radius:2px;
+}
+.brand-name{font-family:var(--font-disp); font-weight:700; font-size:16px; letter-spacing:.04em}
+.brand-name small{display:block; font-size:9.5px; letter-spacing:.18em; color:var(--text-mute); font-weight:500}
+
+.ws-switch{
+  display:flex; align-items:center; gap:10px;
+  padding:7px 12px; border:1px solid var(--border); border-radius:var(--r-md);
+  background:var(--surface); cursor:pointer; color:var(--text);
+  font-family:var(--font-body); font-size:13px;
+}
+.ws-switch:hover{border-color:var(--border-2)}
+.ws-switch .ws-dot{width:7px; height:7px; border-radius:50%; background:var(--primary)}
+.ws-switch b{font-weight:600}
+.ws-switch .caret{color:var(--text-mute); font-size:10px}
+
+.topbar-spacer{flex:1}
+
+.mode-toggle{
+  display:flex; align-items:center; gap:2px;
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:var(--r-pill); padding:3px;
+}
+.mode-toggle button{
+  border:0; background:transparent; cursor:pointer; color:var(--text-mute);
+  width:30px; height:26px; border-radius:var(--r-pill); display:grid; place-items:center;
+  font-size:13px;
+}
+.mode-toggle button.on{background:var(--surface); color:var(--primary); box-shadow:var(--shadow)}
+
+.user-chip{
+  display:flex; align-items:center; gap:9px;
+  padding:5px 11px 5px 6px; border:1px solid var(--border);
+  border-radius:var(--r-pill); background:var(--surface);
+}
+.user-av{
+  width:28px; height:28px; border-radius:50%; flex-shrink:0;
+  background:linear-gradient(150deg,var(--primary),var(--primary-hi));
+  display:grid; place-items:center; color:var(--primary-ink);
+  font-family:var(--font-disp); font-weight:700; font-size:13px;
+}
+.user-meta{line-height:1.25}
+.user-meta b{font-size:12.5px; font-weight:600}
+.user-meta span{display:block; font-size:10.5px; color:var(--text-mute)}
+
+/* ---------- mobile nav burger + drawer close ---------- */
+.nav-burger{
+  display:none; flex-direction:column; justify-content:center;
+  align-items:center; gap:3.5px; flex-shrink:0;
+  width:36px; height:34px; border-radius:var(--r-sm);
+  border:1px solid var(--border); background:var(--surface); cursor:pointer;
+}
+.nav-burger:hover{border-color:var(--border-2)}
+.nav-burger span{width:15px; height:1.9px; border-radius:2px; background:var(--text)}
+.drawer-x{
+  display:none; position:absolute; top:14px; right:13px; z-index:3;
+  width:30px; height:30px; border-radius:var(--r-sm);
+  border:1px solid var(--border); background:var(--surface-2);
+  color:var(--text-dim); cursor:pointer; font-size:14px;
+  place-items:center;
+}
+.drawer-x:hover{color:var(--text); border-color:var(--border-2)}
+
+/* ---------- shell ---------- */
+.shell{
+  display:grid; grid-template-columns:var(--sidebar-w) 1fr;
+  min-height:calc(100vh - var(--topbar-h));
+}
+
+/* ---------- sidebar ---------- */
+.sidebar{
+  border-right:1px solid var(--border);
+  background:var(--surface);
+  padding:var(--sp-5) var(--sp-3) var(--sp-5);
+  display:flex; flex-direction:column; gap:var(--sp-5);
+  position:sticky; top:var(--topbar-h); align-self:start;
+  height:calc(100vh - var(--topbar-h)); overflow-y:auto;
+}
+.ws-card{
+  border:1px solid var(--border); border-radius:var(--r-md);
+  padding:var(--sp-3); background:var(--surface-2);
+}
+.ws-card h2{font-family:var(--font-disp); font-size:13.5px; font-weight:600; letter-spacing:.02em}
+.ws-card .ws-path{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);
+  margin-top:3px; word-break:break-all;
+}
+.ws-badge{
+  display:inline-flex; align-items:center; gap:5px; margin-top:9px;
+  font-size:10px; font-weight:600; padding:3px 8px; border-radius:var(--r-pill);
+  background:var(--surface); border:1px solid var(--border); color:var(--text-dim);
+}
+.ws-badge::before{content:""; width:5px; height:5px; border-radius:1px; background:var(--accent)}
+
+.nav-group{display:flex; flex-direction:column; gap:3px}
+.nav-group .eyebrow{padding:0 8px 4px; display:flex; justify-content:space-between}
+
+.nav-item{
+  display:flex; align-items:center; gap:9px;
+  padding:8px 9px; border-radius:var(--r-sm); cursor:pointer;
+  border:1px solid transparent; color:var(--text); width:100%;
+  background:transparent; font-family:var(--font-body); font-size:13px; text-align:left;
+}
+.nav-item:hover{background:var(--surface-2)}
+.nav-item.active{background:var(--primary-soft); border-color:var(--primary-line)}
+.nav-item.active .nav-name{font-weight:600}
+.nav-item .sdot{width:8px; height:8px; border-radius:50%; flex-shrink:0}
+.nav-item .nav-name{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.nav-item .nav-count{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--text-mute);
+  flex-shrink:0;
+}
+.nav-item .home-ico{
+  width:8px;height:8px;border:1.6px solid var(--text-mute);border-radius:2px;
+}
+.nav-item.active .home-ico{border-color:var(--primary)}
+
+.legend{margin-top:auto; padding-top:var(--sp-4); border-top:1px solid var(--border)}
+.legend .eyebrow{margin-bottom:8px}
+.legend-grid{display:grid; grid-template-columns:1fr 1fr; gap:5px 10px}
+.legend-grid span{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim)}
+.legend-grid i{width:7px; height:7px; border-radius:50%; flex-shrink:0; font-style:normal}
+
+/* ---------- main ---------- */
+.main{padding:var(--sp-6) var(--sp-7); max-width:1080px; width:100%; margin:0 auto}
+.crumb{
+  display:flex; align-items:center; gap:8px;
+  font-size:12px; color:var(--text-mute); margin-bottom:6px;
+}
+.crumb b{color:var(--text-dim); font-weight:500}
+.crumb .sep{opacity:.5}
+.page-title{font-family:var(--font-disp); font-size:23px; font-weight:700; letter-spacing:.01em}
+.page-sub{color:var(--text-dim); font-size:13px; margin-top:3px}
+.page-head{margin-bottom:var(--sp-6)}
+
+.section{margin-bottom:var(--sp-6)}
+.section-head{
+  display:flex; align-items:baseline; gap:10px; margin-bottom:var(--sp-3);
+}
+.section-head .eyebrow{flex-shrink:0}
+.section-head .rule{flex:1; height:1px; background:var(--border)}
+.section-head .meta{font-size:11px; color:var(--text-mute); font-family:var(--font-mono)}
+
+/* ---------- pipeline (가로 DAG) ---------- */
+.pipeline-wrap{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-lg); padding:var(--sp-5) var(--sp-5) var(--sp-4);
+  box-shadow:var(--shadow); overflow-x:auto;
+}
+.pipeline{
+  display:flex; align-items:flex-start; min-width:min-content;
+}
+.pl-node{
+  display:flex; flex-direction:column; align-items:center;
+  flex-shrink:0; width:96px; cursor:pointer;
+}
+.pl-link{
+  flex:1; min-width:24px; height:3px; border-radius:2px; margin-top:53px;
+  background:var(--border-2);
+}
+.pl-link.filled{background:linear-gradient(90deg,var(--primary),var(--primary-hi))}
+/* sprite-reserved zone */
+.pl-perch{
+  height:28px; display:flex; align-items:flex-end; justify-content:center;
+}
+.pl-here{
+  font-family:var(--font-disp); font-size:9.5px; font-weight:700;
+  letter-spacing:.08em; color:var(--primary-ink);
+  background:var(--primary); padding:3px 7px; border-radius:var(--r-sm);
+  position:relative; box-shadow:var(--glow); white-space:nowrap;
+}
+.pl-here::after{
+  content:""; position:absolute; bottom:-4px; left:50%; translate:-50% 0;
+  border:5px solid transparent; border-top-color:var(--primary); border-bottom:0;
+}
+.pl-dot{
+  width:30px; height:30px; border-radius:50%;
+  border:2.5px solid var(--border-2); background:var(--surface);
+  display:grid; place-items:center; flex-shrink:0;
+  transition:transform .15s var(--ease);
+}
+.pl-node:hover .pl-dot{transform:scale(1.12)}
+.pl-dot .check{width:11px; height:6px; border:2.5px solid var(--primary-ink);
+  border-top:0; border-right:0; rotate:-45deg; margin-top:-2px}
+.pl-dot .x{color:#fff; font-size:13px; font-weight:700; line-height:1}
+.pl-node[data-st="done"] .pl-dot{background:var(--primary); border-color:var(--primary)}
+.pl-node[data-st="current"] .pl-dot{
+  background:var(--primary); border-color:var(--primary);
+  box-shadow:var(--glow); animation:pulse 2.4s var(--ease) infinite;
+}
+.pl-node[data-st="current"] .pl-dot::after{
+  content:""; width:9px; height:9px; border-radius:50%; background:var(--primary-ink);
+}
+.pl-node[data-st="verifying"] .pl-dot{border-color:var(--st-verifying)}
+.pl-node[data-st="verifying"] .pl-dot::after{
+  content:""; width:10px; height:10px; border-radius:50%; background:var(--st-verifying)}
+.pl-node[data-st="blocked"] .pl-dot{border-color:var(--st-blocked); border-style:solid}
+.pl-node[data-st="blocked"] .pl-dot{background:var(--st-blocked)}
+.pl-node[data-st="stale"] .pl-dot{border-style:dashed; border-color:var(--st-stale)}
+.pl-node[data-st="waiting"] .pl-dot{border-color:var(--border-2)}
+.pl-label{
+  font-size:11.5px; font-weight:600; margin-top:8px; text-align:center;
+  line-height:1.3; max-width:92px;
+}
+.pl-id{font-family:var(--font-mono); font-size:9.5px; color:var(--text-mute); margin-top:2px}
+.pl-st{font-size:10px; margin-top:3px; font-weight:600}
+@keyframes pulse{
+  0%,100%{box-shadow:0 0 0 0 var(--primary-line)}
+  50%{box-shadow:0 0 0 7px transparent}
+}
+/* parallel segment bracket */
+.pl-gap{width:30px; flex-shrink:0}
+.pl-pgroup{display:flex; flex-direction:column; flex-shrink:0}
+.pl-bracket{height:28px; margin:0 16px; position:relative}
+.pl-bracket::before{
+  content:""; position:absolute; left:0; right:0; bottom:0; height:15px;
+  border:1.6px solid var(--primary-line); border-bottom:0;
+  border-radius:6px 6px 0 0;
+}
+.pl-bracket span{
+  position:absolute; bottom:8px; left:50%; translate:-50% 0;
+  background:var(--surface); padding:0 7px;
+  font-family:var(--font-disp); font-size:9px; font-weight:700;
+  letter-spacing:.11em; color:var(--primary); white-space:nowrap;
+}
+.pl-prow{display:flex}
+
+/* ---------- rollup strip ---------- */
+.rollup{
+  display:flex; flex-wrap:wrap; gap:1px;
+  background:var(--border); border:1px solid var(--border);
+  border-radius:var(--r-md); overflow:hidden;
+}
+.rollup .cell{
+  flex:1; min-width:118px; background:var(--surface);
+  padding:var(--sp-3) var(--sp-4);
+}
+.rollup .cell .k{font-size:11px; color:var(--text-mute)}
+.rollup .cell .v{
+  font-family:var(--font-disp); font-size:21px; font-weight:700; margin-top:2px;
+  display:flex; align-items:baseline; gap:5px;
+}
+.rollup .cell .v small{font-size:11px; font-weight:500; color:var(--text-dim)}
+
+/* ---------- generic card ---------- */
+.card{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-lg); box-shadow:var(--shadow);
+}
+
+/* ---------- repo overview list (workspace home) ---------- */
+.repo-row{
+  display:grid; grid-template-columns:1fr 150px 96px 1fr 26px;
+  gap:var(--sp-4); align-items:center;
+  padding:13px var(--sp-4); cursor:pointer;
+  border-bottom:1px solid var(--border); border-left:2px solid transparent;
+}
+.repo-row:last-child{border-bottom:0}
+.repo-row:hover{background:var(--surface-2)}
+.repo-id{display:flex; align-items:center; gap:9px; min-width:0}
+.repo-id .sdot{width:9px; height:9px; border-radius:50%; flex-shrink:0}
+.repo-id .nm{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.repo-id .gp{
+  font-size:9.5px; font-weight:600; padding:2px 6px; border-radius:var(--r-pill);
+  background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim);
+  flex-shrink:0;
+}
+.repo-id .gp.collab{color:var(--accent); border-color:var(--accent)}
+.cellnext{font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.cellnext .mono{color:var(--text-mute); font-size:11px}
+.agent-cell{display:flex; align-items:center; gap:7px; font-size:12px}
+.agent-dot{width:7px; height:7px; border-radius:50%; flex-shrink:0}
+.agent-dot.on{background:var(--st-done); box-shadow:0 0 0 3px color-mix(in srgb,var(--st-done) 28%,transparent)}
+.agent-dot.off{background:var(--text-mute)}
+.chev{color:var(--text-mute); font-size:13px; text-align:right}
+
+/* meter (분절형 진척 미터) */
+.meter-box{display:flex; align-items:center; gap:9px}
+.meter{
+  flex:1; height:7px; border-radius:4px; background:var(--surface-3);
+  position:relative; overflow:hidden; border:1px solid var(--border);
+}
+.meter-fill{
+  height:100%; border-radius:3px;
+  background:linear-gradient(90deg,var(--primary),var(--primary-hi));
+  width:0; transition:width 1s var(--ease);
+}
+.meter::after{
+  content:""; position:absolute; inset:0;
+  background:repeating-linear-gradient(90deg,transparent 0 9px,var(--surface) 9px 10px);
+  opacity:.55; pointer-events:none;
+}
+.meter-pct{font-family:var(--font-mono); font-size:11px; color:var(--text-dim); width:34px; text-align:right}
+
+/* ---------- task rows ---------- */
+.task-list .task-row{
+  display:flex; align-items:center; gap:var(--sp-3);
+  padding:12px var(--sp-4); cursor:pointer;
+  border-bottom:1px solid var(--border); border-left:2px solid transparent;
+}
+.task-list .task-row:last-child{border-bottom:0}
+.task-list .task-row:hover{background:var(--surface-2)}
+.task-row .sdot{width:8px; height:8px; border-radius:50%; flex-shrink:0}
+.task-row .t-id{font-family:var(--font-mono); font-size:11px; color:var(--text-mute); width:38px; flex-shrink:0}
+.task-row .t-title{flex:1; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.task-row .t-owner{font-size:11.5px; color:var(--text-dim); display:flex; align-items:center; gap:5px}
+.task-row .t-meter{width:120px; flex-shrink:0}
+.task-row .chev{flex-shrink:0}
+.tag{
+  font-size:9.5px; font-weight:600; padding:2px 6px; border-radius:var(--r-pill);
+  border:1px solid var(--border); color:var(--text-dim); white-space:nowrap;
+}
+.tag.par{color:var(--primary); border-color:var(--primary-line); background:var(--primary-soft)}
+
+/* status pill */
+.pill{
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:11px; font-weight:600; padding:3px 9px; border-radius:var(--r-pill);
+  white-space:nowrap;
+}
+.pill i{width:6px; height:6px; border-radius:50%; flex-shrink:0; font-style:normal}
+
+/* status group chips */
+.status-chips{display:flex; flex-wrap:wrap; gap:var(--sp-2)}
+.schip{
+  display:flex; align-items:center; gap:7px;
+  padding:8px 13px; border-radius:var(--r-md);
+  border:1px solid var(--border); background:var(--surface);
+}
+.schip i{width:8px; height:8px; border-radius:50%; font-style:normal}
+.schip .lab{font-size:12px; color:var(--text-dim)}
+.schip .ct{font-family:var(--font-disp); font-weight:700; font-size:15px}
+
+/* ---------- active task card + CP timeline ---------- */
+.active-task{
+  border:1px solid var(--border); border-radius:var(--r-lg);
+  background:var(--surface); box-shadow:var(--shadow); overflow:hidden;
+  border-left:3px solid var(--primary);
+}
+.at-head{
+  display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap;
+  padding:var(--sp-4); background:var(--surface-2); border-bottom:1px solid var(--border);
+}
+.at-head .t-id{font-family:var(--font-mono); font-size:12px; color:var(--text-mute)}
+.at-head h3{font-size:15px; font-weight:600; flex:1}
+.at-meta{
+  display:flex; gap:var(--sp-4); flex-wrap:wrap;
+  padding:10px var(--sp-4); font-size:12px; color:var(--text-dim);
+  border-bottom:1px solid var(--border);
+}
+.at-meta b{color:var(--text); font-weight:600}
+
+/* CP timeline */
+.cp-tl{padding:var(--sp-3) var(--sp-4) var(--sp-4)}
+.cp-row{
+  display:grid; grid-template-columns:26px 1fr; gap:var(--sp-3);
+  cursor:pointer; border-radius:var(--r-sm);
+  padding:9px 8px; margin:0 -8px;
+}
+.cp-row:hover{background:var(--surface-2)}
+.cp-rail{display:flex; flex-direction:column; align-items:center; gap:2px}
+.cp-knob{
+  width:15px; height:15px; border-radius:50%; flex-shrink:0;
+  border:2.5px solid var(--border-2); background:var(--surface); margin-top:2px;
+  display:grid; place-items:center;
+}
+.cp-knob .mini{width:6px;height:3px;border:2px solid var(--primary-ink);border-top:0;border-right:0;rotate:-45deg;margin-top:-1px}
+.cp-row[data-st="done"] .cp-knob{background:var(--primary); border-color:var(--primary)}
+.cp-row[data-st="working"] .cp-knob{
+  background:var(--primary); border-color:var(--primary);
+  box-shadow:var(--glow); animation:pulse 2.4s var(--ease) infinite;
+}
+.cp-row[data-st="verifying"] .cp-knob{border-color:var(--st-verifying); background:var(--st-verifying)}
+.cp-row[data-st="waiting"] .cp-knob{border-color:var(--border-2)}
+.cp-line{
+  flex:1; width:2.5px; min-height:14px;
+  background:var(--border-2); border-radius:2px;
+}
+.cp-row[data-done-line] .cp-line{background:var(--primary)}
+.cp-body{padding-bottom:2px}
+.cp-top{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+.cp-top .cp-id{font-family:var(--font-mono); font-size:10.5px; color:var(--text-mute)}
+.cp-top .cp-name{font-weight:600; font-size:13px}
+.cp-info{font-size:11.5px; color:var(--text-mute); margin-top:2px; font-family:var(--font-mono)}
+.cp-action{font-size:12.5px; color:var(--text-dim); margin-top:4px}
+.cp-action.dim{color:var(--text-mute); font-style:italic}
+
+/* next-work panels */
+.next-grid{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-4)}
+.next-col h4{
+  font-family:var(--font-disp); font-size:12px; font-weight:600;
+  letter-spacing:.04em; margin-bottom:9px; display:flex; align-items:center; gap:7px;
+}
+.next-col h4 i{width:7px;height:7px;border-radius:50%;font-style:normal}
+.next-item{
+  display:flex; align-items:center; gap:10px;
+  padding:11px var(--sp-3); border:1px solid var(--border);
+  border-radius:var(--r-md); background:var(--surface); margin-bottom:7px; cursor:pointer;
+}
+.next-item:hover{border-color:var(--border-2); background:var(--surface-2)}
+.next-item .t-id{font-family:var(--font-mono); font-size:10.5px; color:var(--text-mute)}
+.next-item .nm{flex:1; font-size:13px; font-weight:500}
+.next-item .repo-tag{font-size:10.5px; color:var(--text-mute); font-family:var(--font-mono)}
+.next-item .dep{font-size:10.5px; color:var(--st-blocked)}
+
+/* stale banner */
+.stale-banner{
+  display:flex; align-items:center; gap:10px;
+  padding:11px var(--sp-4); border-radius:var(--r-md);
+  background:color-mix(in srgb,var(--st-stale) 13%,var(--surface));
+  border:1px dashed var(--st-stale); font-size:12.5px; color:var(--text-dim);
+  margin-bottom:var(--sp-4);
+}
+.stale-banner b{color:var(--text)}
+.stale-banner .ico{
+  width:18px;height:18px;border-radius:50%;border:2px dashed var(--st-stale);
+  flex-shrink:0;
+}
+
+/* ---------- CP detail panel (slide-over) ---------- */
+.scrim{
+  position:fixed; inset:0; background:rgba(0,0,0,.42); z-index:50;
+  opacity:0; pointer-events:none; transition:opacity .3s var(--ease);
+}
+.scrim.show{opacity:1; pointer-events:auto}
+.cp-panel{
+  position:fixed; top:0; right:0; height:100%; width:var(--panel-w); max-width:92vw;
+  background:var(--surface); border-left:1px solid var(--border);
+  z-index:51; transform:translateX(100%); transition:transform .34s var(--ease);
+  display:flex; flex-direction:column; box-shadow:var(--lift);
+}
+.cp-panel.show{transform:translateX(0)}
+.panel-head{
+  display:flex; align-items:flex-start; gap:var(--sp-3);
+  padding:var(--sp-5) var(--sp-5) var(--sp-4); border-bottom:1px solid var(--border);
+}
+.panel-head .ph-eye{font-family:var(--font-disp); font-size:10px; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--text-mute)}
+.panel-head h3{font-size:16px; font-weight:700; margin-top:5px; line-height:1.35}
+.panel-head .ph-id{font-family:var(--font-mono); font-size:11px; color:var(--text-mute); margin-top:3px}
+.panel-close{
+  margin-left:auto; flex-shrink:0; width:30px; height:30px; border-radius:var(--r-sm);
+  border:1px solid var(--border); background:var(--surface-2); cursor:pointer;
+  color:var(--text-dim); font-size:15px;
+}
+.panel-close:hover{color:var(--text); border-color:var(--border-2)}
+.panel-body{padding:var(--sp-4) var(--sp-5) var(--sp-6); overflow-y:auto; flex:1}
+.pfield{margin-bottom:var(--sp-4)}
+.pfield .pf-k{
+  font-family:var(--font-disp); font-size:10px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--text-mute); margin-bottom:5px;
+}
+.pfield .pf-v{font-size:13px; color:var(--text)}
+.pfield .pf-v.mono{font-family:var(--font-mono); font-size:12px}
+.pf-box{
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:var(--r-sm); padding:10px 12px; font-size:12.5px; color:var(--text-dim);
+}
+.pf-box.accent{
+  background:var(--primary-soft); border-color:var(--primary-line); color:var(--text);
+}
+.pf-divider{height:1px; background:var(--border); margin:var(--sp-4) 0}
+.pf-grid{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-3)}
+
+/* ---------- demo control ---------- */
+.demo{
+  position:fixed; left:16px; bottom:16px; z-index:45;
+  background:var(--surface); border:1px solid var(--border-2);
+  border-radius:var(--r-md); box-shadow:var(--lift); padding:11px 13px; width:236px;
+}
+.demo .demo-eye{
+  font-family:var(--font-disp); font-size:9.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--text-mute); margin-bottom:8px;
+  display:flex; align-items:center; gap:6px;
+}
+.demo .demo-eye::before{content:""; width:5px; height:5px; border-radius:50%; background:var(--accent)}
+.demo .demo-row{font-size:11px; color:var(--text-dim); margin-bottom:5px}
+.demo .seg{display:flex; gap:4px; margin-bottom:9px}
+.demo .seg button{
+  flex:1; border:1px solid var(--border); background:var(--surface-2);
+  border-radius:var(--r-sm); padding:7px 4px; cursor:pointer; color:var(--text-dim);
+  font-family:var(--font-body); font-size:11.5px;
+}
+.demo .seg button.on{
+  background:var(--primary-soft); border-color:var(--primary-line);
+  color:var(--primary); font-weight:600;
+}
+.demo .seg button b{display:block; font-size:9.5px; font-weight:500; color:var(--text-mute)}
+.demo .seg button.on b{color:var(--primary)}
+.demo .demo-note{font-size:9.5px; color:var(--text-mute); line-height:1.45}
+
+/* ---------- entrance animation ---------- */
+.rise{animation:rise .5s var(--ease) both}
+@keyframes rise{from{opacity:0; transform:translateY(10px)}to{opacity:1; transform:translateY(0)}}
+
+@media (max-width:1180px){
+  .main{padding:var(--sp-5) var(--sp-5)}
+}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr}
+  .next-grid{grid-template-columns:1fr}
+  .pf-grid{grid-template-columns:1fr}
+  .nav-burger{display:flex}
+  /* sidebar becomes a slide-over drawer */
+  .sidebar{
+    position:fixed; top:0; left:0; bottom:0;
+    height:100%; width:286px; max-width:84vw; z-index:52;
+    padding-top:var(--sp-7);
+    transform:translateX(-100%);
+    transition:transform .32s var(--ease),
+      background-color .4s var(--ease), border-color .4s var(--ease);
+  }
+  .sidebar.open{transform:translateX(0); box-shadow:var(--lift)}
+  .drawer-x{display:grid}
+}
+@media (max-width:640px){
+  .main{padding:var(--sp-5) var(--sp-4)}
+  .topbar{padding:0 var(--sp-3); gap:var(--sp-2)}
+  .ws-switch{display:none}
+  .brand-name{font-size:15px}
+  .brand-name small{display:none}
+  .brand-mark{width:27px; height:27px}
+  .user-meta{display:none}
+  .user-chip{padding:3px; border-color:transparent; background:transparent}
+  .page-title{font-size:20px}
+  .page-sub{font-size:12px}
+  .section-head .meta{display:none}
+  .cp-panel{width:100%; max-width:100%}
+  /* repo overview rows → stacked */
+  .repo-row{
+    grid-template-columns:1fr auto;
+    grid-template-areas:"id chev" "meter meter" "prog next";
+    gap:10px var(--sp-3); padding:14px var(--sp-4) 15px;
+  }
+  .repo-row>*:nth-child(1){grid-area:id}
+  .repo-row>*:nth-child(2){grid-area:meter}
+  .repo-row>*:nth-child(3){grid-area:prog}
+  .repo-row>*:nth-child(4){grid-area:next; min-width:0}
+  .repo-row>*:nth-child(5){grid-area:chev; align-self:center}
+  .cellnext{white-space:normal}
+  /* task rows → wrap onto multiple lines */
+  .task-list .task-row{flex-wrap:wrap; gap:5px var(--sp-2); padding:12px var(--sp-3)}
+  .task-row .t-meter{display:none}
+  .task-row .sdot{order:1}
+  .task-row .t-id{order:2}
+  .task-row .pill{order:3}
+  .task-row .chev{order:4; margin-left:auto}
+  .task-row .t-title{order:5; flex:1 1 100%; white-space:normal}
+  .task-row .tag{order:6}
+  .task-row .t-owner{order:6}
+  /* pipeline (DAG) → left-aligned vertical timeline */
+  .pipeline-wrap{overflow-x:visible}
+  .pipeline{flex-direction:column; align-items:stretch; min-width:0}
+  .pl-link{display:none}
+  .pl-node{
+    display:grid; grid-template-columns:30px 1fr; column-gap:14px;
+    width:100%; padding-bottom:22px; position:relative;
+  }
+  .pl-node:last-child{padding-bottom:0}
+  .pl-perch{display:none}
+  .pl-dot{grid-column:1; grid-row:1; align-self:start; position:relative; z-index:1}
+  .pl-label{
+    grid-column:2; grid-row:1; align-self:center;
+    margin-top:0; max-width:none; text-align:left; font-size:13px;
+  }
+  .pl-id{grid-column:2; grid-row:2; text-align:left}
+  .pl-st{grid-column:2; grid-row:3; text-align:left; font-size:11px; margin-top:1px}
+  /* continuous rail joining the dots */
+  .pl-node::before{
+    content:""; position:absolute; left:13.7px; top:15px; bottom:-15px;
+    width:2.6px; border-radius:2px; background:var(--border-2);
+  }
+  .pl-node:last-child::before{display:none}
+  .pl-node[data-rail="on"]::before{background:var(--primary)}
+  /* demo control compact */
+  .demo{width:208px; left:10px; bottom:10px; padding:9px 11px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important; transition-duration:.001s!important}
+}
+</style>
+</head>
+<body class="transy">
+
+<!-- ================= TOPBAR ================= -->
+<header class="topbar transy">
+  <button class="nav-burger" id="navBurger" aria-label="메뉴 열기">
+    <span></span><span></span><span></span>
+  </button>
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div class="brand-name">WILY BOARD<small>AGENT SUPERVISION</small></div>
+  </div>
+  <button class="ws-switch transy" title="워크스페이스 전환">
+    <span class="ws-dot"></span>
+    <span>워크스페이스 · <b>Wily Plugin</b></span>
+    <span class="caret">▾</span>
+  </button>
+  <div class="topbar-spacer"></div>
+  <div class="mode-toggle transy" id="modeToggle">
+    <button data-mode-set="day" title="주간 모드">☀</button>
+    <button data-mode-set="night" title="야간 모드">☾</button>
+  </div>
+  <div class="user-chip transy" id="userChip"></div>
+</header>
+
+<!-- ================= SHELL ================= -->
+<div class="shell">
+  <aside class="sidebar transy" id="sidebar"></aside>
+  <main class="main" id="main"></main>
+</div>
+
+<!-- ================= NAV DRAWER SCRIM ================= -->
+<div class="scrim" id="navScrim"></div>
+
+<!-- ================= CP PANEL ================= -->
+<div class="scrim" id="scrim"></div>
+<aside class="cp-panel transy" id="cpPanel">
+  <div class="panel-head">
+    <div>
+      <div class="ph-eye">체크포인트 상세</div>
+      <h3 id="pnName">—</h3>
+      <div class="ph-id" id="pnId">—</div>
+    </div>
+    <button class="panel-close" id="pnClose">✕</button>
+  </div>
+  <div class="panel-body" id="pnBody"></div>
+</aside>
+
+<!-- ================= DEMO CONTROL ================= -->
+<div class="demo transy">
+  <div class="demo-eye">데모 미리보기</div>
+  <div class="demo-row">로그인 사용자 (실제로는 로그인이 테마를 결정)</div>
+  <div class="seg" id="userSeg">
+    <button data-user="Julirsia" class="on">Julirsia<b>록맨 · rock</b></button>
+    <button data-user="airmang">airmang<b>포르테 · bass</b></button>
+  </div>
+  <div class="demo-note">테마 = 로그인 사용자 고정 · 주간/야간 모드는 우상단에서 전환</div>
+</div>
+
+<script>
+/* ============================================================
+   DATA
+   ============================================================ */
+const ACTORS = {
+  Julirsia:{handle:'Julirsia', char:'록맨',  machine:'ROCK-1', theme:'rock'},
+  airmang :{handle:'airmang',  char:'포르테', machine:'BASS-7', theme:'bass'},
+};
+const ST = {
+  waiting:'대기', working:'작업 중', verifying:'검증 중',
+  blocked:'차단', done:'완료', stale:'오래됨',
+};
+
+const WS = {
+  title:'Wily Plugin Workspace',
+  manifest:'wily-workspace.yaml',
+  root:'~/Code/projects/wily-plugin',
+  repos:[
+    /* ---- collab (R-W-LAB) ---- */
+    {
+      id:'wily-board', group:'collab',
+      remote:'R-W-LAB/wily-board', branch:'feat/agent-visibility',
+      agent:{owner:'airmang', online:true, lastSeen:'12분 전'},
+      stale:false, syncNote:null,
+      tasks:[
+        {id:'T-01', title:'FastAPI 프로젝트 스캐폴드', status:'done', owner:'airmang', deps:[], cps:[
+          {id:'CP1', name:'의존성·라우터 골격', status:'done', updated:'3일 전',
+           action:'uvicorn 진입점과 라우터 트리 구성', verify:'부트 스모크 통과',
+           board:'상태판: 완료', note:'설정은 pydantic-settings로 분리', handoff:'CP 없음 — Task 완료'},
+        ]},
+        {id:'T-04', title:'GitHub OAuth allowlist', status:'done', owner:'airmang', deps:[], cps:[
+          {id:'CP1', name:'OAuth 콜백 핸들러', status:'done', updated:'2일 전',
+           action:'GitHub OAuth 콜백·세션 발급 구현', verify:'단위 테스트 6/6 통과',
+           board:'상태판: 완료', note:'allowlist는 actors.yaml에서 로드', handoff:'세션 미들웨어 → 후속 Task'},
+        ]},
+        {id:'T-08', title:'좌측 레포 트리 컴포넌트', status:'verifying', owner:'Julirsia', deps:['T-04'], cps:[
+          {id:'CP1', name:'트리 데이터 계약', status:'done', updated:'어제 14:20',
+           action:'협업/개인 그룹 트리 JSON 계약 확정', verify:'스키마 검증 통과',
+           board:'상태판: 완료', note:'', handoff:'계약 → CP2'},
+          {id:'CP2', name:'협업/개인 그룹 렌더', status:'done', updated:'오늘 10:05',
+           action:'그룹 헤더·레포 행 렌더 구현', verify:'시각 회귀 통과',
+           board:'상태판: 완료', note:'', handoff:'렌더 → CP3'},
+          {id:'CP3', name:'키보드 탐색·접근성 검증', status:'verifying', owner:'Julirsia', updated:'5분 전',
+           action:'axe 접근성 점검 및 포커스 순회 검증 중', verify:'진행 중 — 위반 0건 목표',
+           board:'상태판: 검증 중 · "axe 스캔 실행"', note:'스크린리더 라벨은 한국어 우선', handoff:'—'},
+        ]},
+        {id:'T-12', title:'SSE 이벤트 스트림 계약', status:'working', owner:'airmang', deps:['T-01'], cps:[
+          {id:'CP1', name:'계약 스키마 초안', status:'done', updated:'어제 18:40',
+           action:'snapshot payload v1 필드 확정', verify:'스키마 lint 통과',
+           board:'상태판: 완료', note:'actor·machine·cp 필드에 idempotency key 포함', handoff:'스키마 초안 → CP2'},
+          {id:'CP2', name:'SSE 핸들러 골격', status:'done', updated:'오늘 09:12',
+           action:'EventSourceResponse 라우트와 채널 구독 추가', verify:'단위 테스트 4/4 통과',
+           board:'상태판: 완료', note:'', handoff:'핸들러 → CP3'},
+          {id:'CP3', name:'재연결·하트비트 처리', status:'working', owner:'airmang', updated:'12분 전',
+           action:'heartbeat 간격 15s, 재연결 backoff 로직 구현 중', verify:'미실행',
+           board:'상태판: 작업 중 · "reconnect 로직 작성"',
+           note:'stale 판정 임계값은 CP4에서 확정', handoff:'—'},
+          {id:'CP4', name:'stale 판정 로직', status:'waiting', updated:'—',
+           action:'', verify:'', board:'', note:'', handoff:''},
+          {id:'CP5', name:'스냅샷 재전송 통합 검증', status:'waiting', updated:'—',
+           action:'', verify:'', board:'', note:'', handoff:''},
+        ]},
+        {id:'T-15', title:'CP 타임라인 드릴다운', status:'waiting', owner:null, deps:['T-12'], parallel:true, cps:[]},
+        {id:'T-21', title:'로드맵 파이프라인 뷰', status:'waiting', owner:null, deps:['T-08'], parallel:true, cps:[]},
+        {id:'T-19', title:'머신 등록 one-time code', status:'blocked', owner:null, deps:['azure-infra · T-03'], cps:[]},
+      ],
+    },
+    {
+      id:'wily-agent', group:'collab',
+      remote:'R-W-LAB/wily-agent', branch:'main',
+      agent:{owner:'Julirsia', online:true, lastSeen:'방금 전'},
+      stale:false, syncNote:null,
+      tasks:[
+        {id:'T-22', title:'에이전트 토큰 핸들링', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'bearer 토큰 해싱', status:'done', updated:'4일 전',
+           action:'머신 토큰 해싱·검증 구현', verify:'테스트 통과', board:'상태판: 완료', note:'', handoff:'토큰 모듈 완료'},
+        ]},
+        {id:'T-27', title:'heartbeat 송신', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'주기 송신 루프', status:'done', updated:'2일 전',
+           action:'15s 주기 heartbeat POST 구현', verify:'테스트 통과', board:'상태판: 완료', note:'', handoff:'presence 송신 완료'},
+        ]},
+        {id:'T-30', title:'status board import 파서', status:'verifying', owner:'Julirsia', deps:['T-27'], cps:[
+          {id:'CP1', name:'import 규칙 정의', status:'done', updated:'어제',
+           action:'status board 파일 탐색·매칭 규칙 정의', verify:'통과', board:'상태판: 완료', note:'', handoff:'규칙 → CP2'},
+          {id:'CP2', name:'누락 이벤트 감지', status:'done', updated:'오늘 08:30',
+           action:'ledger 대비 누락 CP 이벤트 감지 구현', verify:'통과', board:'상태판: 완료', note:'', handoff:'감지 → CP3'},
+          {id:'CP3', name:'idempotency 검증', status:'verifying', owner:'Julirsia', updated:'21분 전',
+           action:'재import 시 중복 방지 키 검증 중', verify:'진행 중',
+           board:'상태판: 검증 중', note:'ledger 우선, status board는 복구 힌트', handoff:'—'},
+        ]},
+        {id:'T-33', title:'snapshot diff 송신', status:'working', owner:'airmang', deps:['T-22'], cps:[
+          {id:'CP1', name:'diff 계산', status:'done', updated:'어제 16:00',
+           action:'.wily 변경 diff 산출 구현', verify:'통과', board:'상태판: 완료', note:'', handoff:'diff → CP2'},
+          {id:'CP2', name:'전송 큐·재시도', status:'working', owner:'airmang', updated:'8분 전',
+           action:'오프라인 시 큐 적재·backoff 재전송 구현 중', verify:'미실행',
+           board:'상태판: 작업 중 · "전송 큐 작성"', note:'재연결 시 최신 snapshot 우선', handoff:'—'},
+          {id:'CP3', name:'통합 검증', status:'waiting', updated:'—', action:'', verify:'', board:'', note:'', handoff:''},
+        ]},
+        {id:'T-35', title:'ledger 누락 감지 경고', status:'waiting', owner:null, deps:['T-30'], parallel:true, cps:[]},
+      ],
+    },
+    {
+      id:'rwlab-portal', group:'collab',
+      remote:'R-W-LAB/rwlab-portal', branch:'develop',
+      agent:{owner:'airmang', online:false, lastSeen:'2일 전'},
+      stale:true, syncNote:'마지막 성공 동기화 2일 전 · 사유: 머신 오프라인 (BASS-7 연결 끊김)',
+      tasks:[
+        {id:'T-39', title:'디자인 토큰 정의', status:'done', owner:'airmang', deps:[], cps:[
+          {id:'CP1', name:'색·타이포 토큰', status:'done', updated:'5일 전',
+           action:'공유 디자인 토큰 확정', verify:'통과', board:'상태판: 완료', note:'', handoff:'토큰 완료'},
+        ]},
+        {id:'T-40', title:'포털 셸 레이아웃', status:'working', owner:'airmang', deps:['T-39'], cps:[
+          {id:'CP1', name:'셸 그리드 구성', status:'done', updated:'2일 전',
+           action:'헤더·사이드·메인 그리드 구성', verify:'통과', board:'상태판: 완료', note:'', handoff:'그리드 → CP2'},
+          {id:'CP2', name:'반응형 브레이크포인트', status:'working', owner:'airmang', updated:'2일 전',
+           action:'반응형 처리 작업 중 — 머신 오프라인으로 중단', verify:'미실행',
+           board:'상태판: 작업 중 (오래됨)', note:'재연결 시 snapshot 재전송 예정', handoff:'—'},
+        ]},
+        {id:'T-41', title:'공유 인증 게이트', status:'blocked', owner:null, deps:['wily-agent · T-30'], cps:[]},
+      ],
+    },
+    /* ---- personal ---- */
+    {
+      id:'wily-roadmap', group:'personal',
+      remote:'kokyuhyun/wily-roadmap', branch:'main',
+      agent:{owner:'Julirsia', online:true, lastSeen:'방금 전'},
+      stale:false, syncNote:null,
+      tasks:[
+        {id:'T-44', title:'스케줄링 헬퍼', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'parallel·waiting 후보', status:'done', updated:'1주 전',
+           action:'병렬/대기 후보 산출 헬퍼 구현', verify:'통과', board:'상태판: 완료', note:'', handoff:'헬퍼 완료'},
+        ]},
+        {id:'T-47', title:'CP ledger 계약', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'progress.jsonl 스키마', status:'done', updated:'6일 전',
+           action:'CP start/done/note 이벤트 스키마 확정', verify:'통과', board:'상태판: 완료', note:'', handoff:'계약 완료'},
+        ]},
+        {id:'T-48', title:'v3 Task 로더', status:'done', owner:'Julirsia', deps:['T-47'], cps:[
+          {id:'CP1', name:'tasks.yaml 파서', status:'done', updated:'4일 전',
+           action:'flat task 로더 구현', verify:'통과', board:'상태판: 완료', note:'', handoff:'로더 완료'},
+        ]},
+        {id:'T-50', title:'workspace 매니페스트 파서', status:'working', owner:'Julirsia', deps:['T-48'], cps:[
+          {id:'CP1', name:'매니페스트 스키마', status:'done', updated:'어제',
+           action:'wily-workspace-v1 스키마·검색 규칙 구현', verify:'통과',
+           board:'상태판: 완료', note:'부모 .wily 생성하지 않음', handoff:'스키마 → CP2'},
+          {id:'CP2', name:'자식 레포 검증', status:'done', updated:'오늘 11:40',
+           action:'repo id 중복·경로 유효성 검증', verify:'통과', board:'상태판: 완료', note:'', handoff:'검증 → CP3'},
+          {id:'CP3', name:'집계 페이로드 생성', status:'working', owner:'Julirsia', updated:'6분 전',
+           action:'레포별 done/total·다음 작업 집계 payload 작성 중', verify:'미실행',
+           board:'상태판: 작업 중 · "workspace_snapshot 구현"',
+           note:'자식 .wily/tasks.yaml만 읽고 부모에 쓰지 않음', handoff:'—'},
+          {id:'CP4', name:'에러·누락 레포 처리', status:'waiting', updated:'—', action:'', verify:'', board:'', note:'', handoff:''},
+        ]},
+        {id:'T-52', title:'wily workspace CLI', status:'waiting', owner:null, deps:['T-50'], parallel:true, cps:[]},
+      ],
+    },
+    {
+      id:'azure-infra', group:'personal',
+      remote:'kokyuhyun/azure-infra', branch:'main',
+      agent:null, stale:false, syncNote:null,
+      tasks:[
+        {id:'T-02', title:'systemd 유닛 구성', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'서비스 유닛 파일', status:'done', updated:'1주 전',
+           action:'FastAPI·Caddy systemd 유닛 작성', verify:'부트 확인', board:'상태판: 완료', note:'', handoff:'유닛 완료'},
+        ]},
+        {id:'T-03', title:'보안 그룹 구성', status:'waiting', owner:null, deps:[], cps:[]},
+        {id:'T-05', title:'Caddy reverse proxy', status:'waiting', owner:null, deps:['T-03'], parallel:false, cps:[]},
+      ],
+    },
+    {
+      id:'dotfiles', group:'personal',
+      remote:'kokyuhyun/dotfiles', branch:'main',
+      agent:null, stale:false, syncNote:null,
+      tasks:[
+        {id:'T-60', title:'zsh 설정', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'프롬프트·플러그인', status:'done', updated:'2주 전',
+           action:'zsh 설정 정리', verify:'통과', board:'상태판: 완료', note:'', handoff:'완료'},
+        ]},
+        {id:'T-61', title:'git 설정', status:'done', owner:'Julirsia', deps:[], cps:[
+          {id:'CP1', name:'alias·hooks', status:'done', updated:'2주 전',
+           action:'git alias·훅 정리', verify:'통과', board:'상태판: 완료', note:'', handoff:'완료'},
+        ]},
+      ],
+    },
+  ],
+};
+
+/* ============================================================
+   STATE + HELPERS
+   ============================================================ */
+const state = { user:'Julirsia', mode:'day', view:'home' };
+
+const repoById = id => WS.repos.find(r=>r.id===id);
+const STATUS_RANK = {working:0, verifying:1, blocked:2, waiting:3, done:4, stale:5};
+
+function repoCounts(repo){
+  const c = {waiting:0,working:0,verifying:0,blocked:0,done:0,stale:0};
+  repo.tasks.forEach(t=>c[t.status]++);
+  return c;
+}
+function repoProgress(repo){
+  const w = {done:1, verifying:.85, working:.5, blocked:0, waiting:0, stale:0};
+  const sum = repo.tasks.reduce((a,t)=>a+(w[t.status]||0),0);
+  return Math.round(sum / repo.tasks.length * 100);
+}
+function repoHeadStatus(repo){
+  if(repo.stale) return 'stale';
+  const c = repoCounts(repo);
+  if(c.working) return 'working';
+  if(c.verifying) return 'verifying';
+  if(c.blocked) return 'blocked';
+  if(c.waiting) return 'waiting';
+  return 'done';
+}
+function repoCurrentTaskIndex(repo){
+  let i = repo.tasks.findIndex(t=>t.status==='working');
+  if(i<0) i = repo.tasks.findIndex(t=>t.status==='verifying');
+  if(i<0) i = repo.tasks.findIndex(t=>t.status!=='done');
+  if(i<0) i = repo.tasks.length-1;
+  return i;
+}
+function nextTask(repo){
+  const t = repo.tasks.find(t=>t.status==='waiting');
+  return t || null;
+}
+function actorName(handle){ return handle ? ACTORS[handle].char : '미배정'; }
+
+function statusColor(st){
+  return st==='working' ? 'var(--primary)' : `var(--st-${st})`;
+}
+function pill(st){
+  return `<span class="pill" style="background:color-mix(in srgb,${statusColor(st)} 13%,var(--surface));color:${statusColor(st)}">
+    <i style="background:${statusColor(st)}"></i>${ST[st]}</span>`;
+}
+function sdot(st){ return `<span class="sdot" style="background:${statusColor(st)}"></span>`; }
+
+function meter(pct){
+  return `<div class="meter-box">
+    <div class="meter"><div class="meter-fill" data-w="${pct}"></div></div>
+    <span class="meter-pct">${pct}%</span></div>`;
+}
+
+/* ============================================================
+   THEME
+   ============================================================ */
+function applyTheme(){
+  const a = ACTORS[state.user];
+  document.documentElement.dataset.theme = a.theme;
+  document.documentElement.dataset.mode = state.mode;
+  document.getElementById('userChip').innerHTML =
+    `<div class="user-av">${a.char[0]}</div>
+     <div class="user-meta"><b>${a.handle}</b><span>${a.char} · ${a.machine}</span></div>`;
+  document.querySelectorAll('#modeToggle button').forEach(b=>
+    b.classList.toggle('on', b.dataset.modeSet===state.mode));
+  document.querySelectorAll('#userSeg button').forEach(b=>
+    b.classList.toggle('on', b.dataset.user===state.user));
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+function renderSidebar(){
+  const groups = [
+    {key:'collab',  label:'협업 레포 · R-W-LAB'},
+    {key:'personal',label:'개인 레포'},
+  ];
+  let nav = `<button class="nav-item ${state.view==='home'?'active':''}" data-nav="home">
+    <span class="home-ico"></span><span class="nav-name">감독 현황 · 홈</span></button>`;
+  groups.forEach(g=>{
+    const repos = WS.repos.filter(r=>r.group===g.key);
+    nav += `<div class="nav-group" style="margin-top:14px">
+      <div class="eyebrow"><span>${g.label}</span><span>${repos.length}</span></div>`;
+    repos.forEach(r=>{
+      const c = repoCounts(r);
+      const active = c.working+c.verifying;
+      nav += `<button class="nav-item ${state.view===r.id?'active':''}" data-nav="${r.id}">
+        ${sdot(repoHeadStatus(r))}
+        <span class="nav-name">${r.id}</span>
+        <span class="nav-count">${active?active+' 진행':'·'}</span></button>`;
+    });
+    nav += `</div>`;
+  });
+
+  const legendItems = Object.keys(ST).map(k=>
+    `<span><i style="background:${statusColor(k)}"></i>${ST[k]}</span>`).join('');
+
+  document.getElementById('sidebar').innerHTML = `
+    <button class="drawer-x" id="drawerX" aria-label="메뉴 닫기">✕</button>
+    <div class="ws-card transy">
+      <h2>${WS.title}</h2>
+      <div class="ws-path">${WS.root}/${WS.manifest}</div>
+      <span class="ws-badge">매니페스트 전용 · 부모 .wily 없음</span>
+    </div>
+    <div class="nav-group">${nav}</div>
+    <div class="legend">
+      <div class="eyebrow">표준 상태</div>
+      <div class="legend-grid">${legendItems}</div>
+    </div>`;
+}
+
+/* ============================================================
+   PIPELINE  (가로 DAG)
+   ============================================================ */
+function pipeline(nodes, currentIdx){
+  // node: {id, label, sub, st}  st: done|current|verifying|blocked|waiting|stale
+  let html = `<div class="pipeline-wrap transy"><div class="pipeline">`;
+  nodes.forEach((n,i)=>{
+    if(i>0){
+      const filled = i<=currentIdx;
+      html += `<div class="pl-link ${filled?'filled':''}"></div>`;
+    }
+    const isCur = i===currentIdx;
+    const st = isCur ? 'current' : n.st;
+    const inner = n.st==='done'&&!isCur ? '<span class="check"></span>'
+               : n.st==='blocked' ? '<span class="x">✕</span>' : '';
+    const stColor = isCur ? 'var(--primary)' : statusColor(n.st==='current'?'working':n.st);
+    html += `<div class="pl-node" data-st="${st}" data-pl="${n.id}" data-rail="${i<currentIdx?'on':''}">
+      <div class="pl-perch">${isCur?`<span class="pl-here">${n.here||'현재'}</span>`:''}</div>
+      <div class="pl-dot">${isCur?'':inner}</div>
+      <div class="pl-label">${n.label}</div>
+      <div class="pl-id">${n.id}</div>
+      <div class="pl-st" style="color:${stColor}">${n.sub}</div>
+    </div>`;
+  });
+  html += `</div></div>`;
+  return html;
+}
+
+/* ============================================================
+   HOME VIEW
+   ============================================================ */
+function renderHome(){
+  // workspace pipeline — nodes = repos
+  const curRepoIdx = WS.repos.findIndex(r=>r.id==='wily-board');
+  const wsNodes = WS.repos.map(r=>{
+    const hs = repoHeadStatus(r);
+    return {
+      id:r.id, label:r.id, sub:repoProgress(r)+'%',
+      st: hs==='working'?'done':hs, // non-current rendered by head status
+      here: ACTORS[r.agent?.owner]?.char,
+    };
+  });
+  // mark statuses cleanly: done if 100, else by head status
+  WS.repos.forEach((r,i)=>{
+    const p = repoProgress(r); const hs = repoHeadStatus(r);
+    wsNodes[i].st = p>=100 ? 'done' : (hs==='working'?'waiting':hs);
+    wsNodes[i].sub = p+'%';
+  });
+
+  // rollup
+  let totT=0,tDone=0,tProg=0,tBlock=0,agents=0;
+  WS.repos.forEach(r=>{
+    const c=repoCounts(r); totT+=r.tasks.length;
+    tDone+=c.done; tProg+=c.working+c.verifying; tBlock+=c.blocked;
+    if(r.agent&&r.agent.online) agents++;
+  });
+  const donePct = Math.round(tDone/totT*100);
+
+  // my in-progress tasks
+  const mine=[];
+  WS.repos.forEach(r=>r.tasks.forEach(t=>{
+    if(t.owner===state.user && (t.status==='working'||t.status==='verifying'))
+      mine.push({repo:r, task:t});
+  }));
+
+  // next work — global
+  const par=[], wait=[];
+  WS.repos.forEach(r=>r.tasks.forEach(t=>{
+    if(t.status==='waiting'){
+      (t.parallel?par:wait).push({repo:r, task:t});
+    }
+  }));
+
+  const repoRows = WS.repos.map(r=>{
+    const c=repoCounts(r), nx=nextTask(r), hs=repoHeadStatus(r);
+    const ag = r.agent
+      ? `<span class="agent-dot ${r.agent.online?'on':'off'}"></span>
+         ${actorName(r.agent.owner)} <span style="color:var(--text-mute)">· ${r.agent.lastSeen}</span>`
+      : `<span class="agent-dot off"></span><span style="color:var(--text-mute)">에이전트 없음</span>`;
+    return `<div class="repo-row transy" data-nav="${r.id}" style="border-left-color:${statusColor(hs)}">
+      <div class="repo-id">
+        ${sdot(hs)}
+        <span class="nm">${r.id}</span>
+        <span class="gp ${r.group==='collab'?'collab':''}">${r.group==='collab'?'협업':'개인'}</span>
+      </div>
+      ${meter(repoProgress(r))}
+      <div style="font-size:12px;color:var(--text-dim)">
+        진행 <b style="color:var(--text)">${c.working+c.verifying}</b>
+        ${c.blocked?` · <span style="color:var(--st-blocked)">차단 ${c.blocked}</span>`:''}
+      </div>
+      <div class="cellnext">${nx?`<span class="mono">${nx.id}</span> ${nx.title}`:'<span style="color:var(--text-mute)">다음 작업 없음</span>'}</div>
+      <div class="chev">›</div>
+    </div>`;
+  }).join('');
+
+  const mineRows = mine.length ? mine.map(({repo,task})=>{
+    const cur = task.cps.find(cp=>cp.status==='working'||cp.status==='verifying') || task.cps[task.cps.length-1];
+    return `<div class="task-row transy" data-cp="${repo.id}|${task.id}|${cur?cur.id:''}" style="border-left-color:${statusColor(task.status)}">
+      ${sdot(task.status)}
+      <span class="t-id">${task.id}</span>
+      <span class="t-title">${task.title}</span>
+      ${pill(task.status)}
+      <span class="t-owner mono">${repo.id}</span>
+      <span class="chev" style="color:var(--text-mute)">›</span>
+    </div>`;
+  }).join('') : `<div style="padding:18px;color:var(--text-mute);font-size:13px;text-align:center">
+      ${actorName(state.user)} 담당으로 진행 중인 작업이 없습니다.</div>`;
+
+  function nextItems(arr, depShow){
+    if(!arr.length) return `<div style="font-size:12px;color:var(--text-mute);padding:8px">없음</div>`;
+    return arr.map(({repo,task})=>`
+      <div class="next-item transy" data-nav="${repo.id}">
+        <span class="t-id">${task.id}</span>
+        <span class="nm">${task.title}</span>
+        ${depShow&&task.deps.length?`<span class="dep">의존 ${task.deps[0]}</span>`:''}
+        <span class="repo-tag">${repo.id}</span>
+      </div>`).join('');
+  }
+
+  document.getElementById('main').innerHTML = `
+    <div class="page-head rise">
+      <div class="crumb"><b>워크스페이스</b></div>
+      <div class="page-title">감독 현황</div>
+      <div class="page-sub">${WS.title} · 자식 레포 ${WS.repos.length}개 · 매니페스트가 부모, 각 레포의 <span class="mono">.wily/</span>가 실제 출처</div>
+    </div>
+
+    <div class="section rise" style="animation-delay:.05s">
+      <div class="section-head">
+        <span class="eyebrow">워크스페이스 파이프라인</span><span class="rule"></span>
+        <span class="meta">레포별 단계 · 클릭하여 진입</span>
+      </div>
+      ${pipeline(wsNodes, curRepoIdx)}
+    </div>
+
+    <div class="section rise" style="animation-delay:.1s">
+      <div class="rollup transy">
+        <div class="cell"><div class="k">자식 레포</div><div class="v">${WS.repos.length}</div></div>
+        <div class="cell"><div class="k">진행 중 작업</div><div class="v" style="color:var(--primary)">${tProg}</div></div>
+        <div class="cell"><div class="k">차단</div><div class="v" style="color:var(--st-blocked)">${tBlock}</div></div>
+        <div class="cell"><div class="k">완료율</div><div class="v">${donePct}<small>% · ${tDone}/${totT}</small></div></div>
+        <div class="cell"><div class="k">활성 에이전트</div><div class="v" style="color:var(--st-done)">${agents}</div></div>
+      </div>
+    </div>
+
+    <div class="section rise" style="animation-delay:.15s">
+      <div class="section-head">
+        <span class="eyebrow">워크스페이스 개요</span><span class="rule"></span>
+        <span class="meta">부모 → 자식 레포</span>
+      </div>
+      <div class="card transy">${repoRows}</div>
+    </div>
+
+    <div class="section rise" style="animation-delay:.2s">
+      <div class="section-head">
+        <span class="eyebrow">내 진행 중 작업 · ${actorName(state.user)}</span><span class="rule"></span>
+        <span class="meta">${mine.length}건</span>
+      </div>
+      <div class="card task-list transy">${mineRows}</div>
+    </div>
+
+    <div class="section rise" style="animation-delay:.25s">
+      <div class="section-head">
+        <span class="eyebrow">다음 착수 가능</span><span class="rule"></span>
+      </div>
+      <div class="next-grid">
+        <div class="next-col">
+          <h4><i style="background:var(--primary)"></i>병렬 가능</h4>
+          ${nextItems(par,false)}
+        </div>
+        <div class="next-col">
+          <h4><i style="background:var(--st-waiting)"></i>의존 대기</h4>
+          ${nextItems(wait,true)}
+        </div>
+      </div>
+    </div>`;
+
+  animateMeters();
+}
+
+/* ============================================================
+   REPO VIEW
+   ============================================================ */
+function renderRepo(repoId){
+  const repo = repoById(repoId);
+  const c = repoCounts(repo);
+  const curIdx = repoCurrentTaskIndex(repo);
+
+  // repo pipeline — nodes = tasks (topological order = authored order)
+  const nodes = repo.tasks.map(t=>({
+    id:t.id, label:t.title.length>10?t.title.slice(0,9)+'…':t.title,
+    sub:ST[t.status], st:t.status, here:actorName(t.owner),
+  }));
+
+  const chips = Object.keys(ST).map(k=>`
+    <div class="schip transy">
+      <i style="background:${statusColor(k)}"></i>
+      <span class="lab">${ST[k]}</span>
+      <span class="ct">${c[k]}</span>
+    </div>`).join('');
+
+  // active (working) tasks expanded with CP timeline
+  const working = repo.tasks.filter(t=>t.status==='working');
+  const activeHtml = working.map(t=>activeTaskCard(repo,t)).join('');
+
+  // other tasks compact, grouped by status rank
+  const others = repo.tasks
+    .filter(t=>t.status!=='working')
+    .sort((a,b)=>STATUS_RANK[a.status]-STATUS_RANK[b.status]);
+  const otherRows = others.map(t=>{
+    const cur = t.cps.find(cp=>cp.status==='working'||cp.status==='verifying') || t.cps[t.cps.length-1];
+    const cpProg = t.cps.length ? Math.round(t.cps.filter(cp=>cp.status==='done').length/t.cps.length*100) : (t.status==='done'?100:0);
+    return `<div class="task-row transy" data-cp="${repo.id}|${t.id}|${cur?cur.id:''}" style="border-left-color:${statusColor(t.status)}">
+      ${sdot(t.status)}
+      <span class="t-id">${t.id}</span>
+      <span class="t-title">${t.title}</span>
+      ${t.parallel?'<span class="tag par">병렬 가능</span>':''}
+      ${t.deps.length&&t.status==='blocked'?`<span class="tag" style="color:var(--st-blocked);border-color:var(--st-blocked)">의존 ${t.deps[0]}</span>`:''}
+      ${pill(t.status)}
+      <span class="t-owner">${t.owner?actorName(t.owner):'<span style="color:var(--text-mute)">미배정</span>'}</span>
+      <div class="t-meter">${miniMeter(cpProg)}</div>
+      <span class="chev" style="color:var(--text-mute)">›</span>
+    </div>`;
+  }).join('');
+
+  const nx = nextTask(repo);
+
+  document.getElementById('main').innerHTML = `
+    <div class="page-head rise">
+      <div class="crumb">
+        <b>워크스페이스</b><span class="sep">›</span>
+        <b>${repo.group==='collab'?'협업 레포':'개인 레포'}</b><span class="sep">›</span>
+        <span style="color:var(--text-dim)">${repo.id}</span>
+      </div>
+      <div class="page-title">${repo.id}</div>
+      <div class="page-sub">
+        <span class="mono">${repo.remote}</span> ·
+        브랜치 <span class="mono">${repo.branch}</span> ·
+        ${repo.group==='collab'?'협업 (R-W-LAB)':'개인'}
+      </div>
+    </div>
+
+    ${repo.stale?`<div class="stale-banner transy">
+      <span class="ico"></span>
+      <span><b>오래됨</b> — ${repo.syncNote}</span>
+    </div>`:''}
+
+    <div class="section rise" style="animation-delay:.05s">
+      <div class="section-head">
+        <span class="eyebrow">레포 파이프라인</span><span class="rule"></span>
+        <span class="meta">Task 의존 순 · 클릭하여 이동</span>
+      </div>
+      ${pipeline(nodes, curIdx)}
+    </div>
+
+    <div class="section rise" style="animation-delay:.1s">
+      <div class="section-head"><span class="eyebrow">상태 요약</span><span class="rule"></span></div>
+      <div class="status-chips">${chips}</div>
+    </div>
+
+    ${working.length?`<div class="section rise" style="animation-delay:.15s">
+      <div class="section-head">
+        <span class="eyebrow">진행 중 작업 · 체크포인트 타임라인</span><span class="rule"></span>
+      </div>
+      ${activeHtml}
+    </div>`:''}
+
+    <div class="section rise" style="animation-delay:.2s">
+      <div class="section-head">
+        <span class="eyebrow">그 외 작업</span><span class="rule"></span>
+        <span class="meta">${others.length}건</span>
+      </div>
+      <div class="card task-list transy">${otherRows||'<div style="padding:16px;color:var(--text-mute)">없음</div>'}</div>
+    </div>
+
+    <div class="section rise" style="animation-delay:.25s">
+      <div class="section-head"><span class="eyebrow">다음 착수 가능</span><span class="rule"></span></div>
+      ${nx?`<div class="next-item transy" data-cp="${repo.id}|${nx.id}|" style="max-width:480px">
+        <span class="t-id">${nx.id}</span>
+        <span class="nm">${nx.title}</span>
+        ${nx.parallel?'<span class="tag par">병렬 가능</span>':''}
+        ${nx.deps.length?`<span class="repo-tag">의존 ${nx.deps[0]}</span>`:''}
+      </div>`:'<div style="font-size:13px;color:var(--text-mute)">다음 착수 가능한 작업이 없습니다.</div>'}
+    </div>`;
+
+  animateMeters();
+}
+
+function miniMeter(pct){
+  return `<div class="meter-box">
+    <div class="meter" style="height:6px"><div class="meter-fill" data-w="${pct}"></div></div>
+    <span class="meter-pct" style="font-size:10px;width:30px">${pct}%</span></div>`;
+}
+
+function activeTaskCard(repo,t){
+  const cpDone = t.cps.filter(cp=>cp.status==='done').length;
+  const cpProg = t.cps.length?Math.round(cpDone/t.cps.length*100):0;
+  let tl='';
+  t.cps.forEach((cp,i)=>{
+    const last = i===t.cps.length-1;
+    const doneLine = cp.status==='done';
+    tl += `<div class="cp-row transy" data-st="${cp.status}" ${doneLine?'data-done-line':''}
+        data-cp="${repo.id}|${t.id}|${cp.id}">
+      <div class="cp-rail">
+        <div class="cp-knob">${cp.status==='done'?'<span class="mini"></span>':''}</div>
+        ${last?'':'<div class="cp-line"></div>'}
+      </div>
+      <div class="cp-body">
+        <div class="cp-top">
+          <span class="cp-id">${cp.id}</span>
+          <span class="cp-name">${cp.name}</span>
+          ${pill(cp.status)}
+        </div>
+        ${cp.status!=='waiting'
+          ? `<div class="cp-info">${cp.owner?actorName(cp.owner)+' · ':''}${cp.updated}</div>
+             <div class="cp-action">${cp.action||'—'}</div>`
+          : `<div class="cp-action dim">아직 시작되지 않음</div>`}
+      </div>
+    </div>`;
+  });
+  return `<div class="active-task transy">
+    <div class="at-head">
+      <span class="t-id">${t.id}</span>
+      <h3>${t.title}</h3>
+      ${pill(t.status)}
+    </div>
+    <div class="at-meta">
+      <span>담당 <b>${actorName(t.owner)}</b></span>
+      <span>머신 <b>${ACTORS[t.owner]?.machine||'—'}</b></span>
+      <span>체크포인트 <b>${cpDone}/${t.cps.length}</b></span>
+      <span>의존 <b>${t.deps.length?t.deps.join(', '):'없음'}</b></span>
+      <span style="flex:1;min-width:120px">${miniMeter(cpProg)}</span>
+    </div>
+    <div class="cp-tl">${tl}</div>
+  </div>`;
+}
+
+/* ============================================================
+   CP DETAIL PANEL
+   ============================================================ */
+function findCP(repoId,taskId,cpId){
+  const repo=repoById(repoId);
+  const task=repo.tasks.find(t=>t.id===taskId);
+  const cp=cpId?task.cps.find(c=>c.id===cpId):null;
+  return {repo,task,cp};
+}
+function openCP(repoId,taskId,cpId){
+  const {repo,task,cp}=findCP(repoId,taskId,cpId);
+  document.getElementById('pnId').textContent =
+    `${repo.id} · ${task.id}${cp?' · '+cp.id:''}`;
+
+  if(!cp){
+    document.getElementById('pnName').textContent = task.title;
+    document.getElementById('pnBody').innerHTML = `
+      <div class="pfield"><div class="pf-k">표준 상태</div><div class="pf-v">${pill(task.status)}</div></div>
+      <div class="pfield"><div class="pf-k">담당 · 머신</div>
+        <div class="pf-v">${task.owner?actorName(task.owner)+' · '+ACTORS[task.owner].machine:'미배정'}</div></div>
+      <div class="pfield"><div class="pf-k">의존</div>
+        <div class="pf-v mono">${task.deps.length?task.deps.join(', '):'없음'}</div></div>
+      <div class="pf-divider"></div>
+      <div class="pf-box">이 작업은 아직 체크포인트로 분해되지 않았습니다.
+        에이전트가 착수하면 <span class="mono">.wily/tasks/${task.id}/progress.jsonl</span>
+        ledger에 CP 이벤트가 쌓입니다.</div>`;
+  } else {
+    document.getElementById('pnName').textContent = cp.name;
+    const verifyColor = cp.verify==='미실행'||!cp.verify ? 'var(--text-mute)'
+      : cp.verify.includes('진행') ? 'var(--st-verifying)' : 'var(--st-done)';
+    document.getElementById('pnBody').innerHTML = `
+      <div class="pf-grid">
+        <div class="pfield"><div class="pf-k">표준 상태</div><div class="pf-v">${pill(cp.status)}</div></div>
+        <div class="pfield"><div class="pf-k">마지막 업데이트</div><div class="pf-v mono">${cp.updated}</div></div>
+        <div class="pfield"><div class="pf-k">담당</div><div class="pf-v">${cp.owner?actorName(cp.owner):actorName(task.owner)}</div></div>
+        <div class="pfield"><div class="pf-k">머신</div><div class="pf-v mono">${ACTORS[cp.owner||task.owner]?.machine||'—'}</div></div>
+      </div>
+      <div class="pf-divider"></div>
+      <div class="pfield"><div class="pf-k">현재 액션</div>
+        <div class="pf-box accent">${cp.action||'—'}</div></div>
+      <div class="pfield"><div class="pf-k">상태판 요약 (import)</div>
+        <div class="pf-box">${cp.board||'상태판 기록 없음'}</div></div>
+      <div class="pfield"><div class="pf-k">검증 결과</div>
+        <div class="pf-v" style="color:${verifyColor};font-weight:600">${cp.verify||'—'}</div></div>
+      <div class="pfield"><div class="pf-k">메모</div>
+        <div class="pf-box">${cp.note||'메모 없음'}</div></div>
+      <div class="pf-divider"></div>
+      <div class="pfield"><div class="pf-k">result / handoff 요약</div>
+        <div class="pf-box">${cp.handoff||'—'}</div></div>
+      <div class="pfield" style="margin-top:18px">
+        <div class="pf-k">체크포인트 원본 이름</div>
+        <div class="pf-v mono">${task.id} / ${cp.id} · ${cp.name}</div></div>`;
+  }
+  document.getElementById('cpPanel').classList.add('show');
+  document.getElementById('scrim').classList.add('show');
+}
+function closeCP(){
+  document.getElementById('cpPanel').classList.remove('show');
+  document.getElementById('scrim').classList.remove('show');
+}
+
+/* ============================================================
+   RENDER + EVENTS
+   ============================================================ */
+function animateMeters(){
+  requestAnimationFrame(()=>{
+    document.querySelectorAll('.meter-fill').forEach(el=>{
+      el.style.width = (el.dataset.w||0)+'%';
+    });
+  });
+}
+function render(){
+  renderSidebar();
+  if(state.view==='home') renderHome();
+  else renderRepo(state.view);
+}
+
+/* ---- mobile nav drawer ---- */
+const navScrim=document.getElementById('navScrim');
+function openNav(){
+  document.getElementById('sidebar').classList.add('open');
+  navScrim.classList.add('show');
+}
+function closeNav(){
+  document.getElementById('sidebar').classList.remove('open');
+  navScrim.classList.remove('show');
+}
+document.getElementById('navBurger').addEventListener('click',openNav);
+navScrim.addEventListener('click',closeNav);
+window.addEventListener('resize',()=>{ if(window.innerWidth>980) closeNav(); });
+
+document.addEventListener('click',e=>{
+  const nav=e.target.closest('[data-nav]');
+  const cp=e.target.closest('[data-cp]');
+  const pl=e.target.closest('[data-pl]');
+  const modeBtn=e.target.closest('[data-mode-set]');
+  const userBtn=e.target.closest('[data-user]');
+
+  if(e.target.closest('#drawerX')){ closeNav(); return; }
+  if(modeBtn){ state.mode=modeBtn.dataset.modeSet; applyTheme(); return; }
+  if(userBtn){ state.user=userBtn.dataset.user; applyTheme(); render(); return; }
+
+  if(cp){
+    const [r,t,c]=cp.dataset.cp.split('|');
+    openCP(r,t,c||null);
+    return;
+  }
+  if(pl){
+    const id=pl.dataset.pl;
+    if(state.view==='home'){ state.view=id; render(); window.scrollTo(0,0); }
+    else {
+      // repo pipeline → open that task's current CP
+      const repo=repoById(state.view);
+      const task=repo.tasks.find(x=>x.id===id);
+      const cur=task.cps.find(x=>x.status==='working'||x.status==='verifying')||task.cps[task.cps.length-1];
+      openCP(state.view,id,cur?cur.id:null);
+    }
+    return;
+  }
+  if(nav){ closeNav(); state.view=nav.dataset.nav; render(); window.scrollTo(0,0); return; }
+});
+document.getElementById('pnClose').addEventListener('click',closeCP);
+document.getElementById('scrim').addEventListener('click',closeCP);
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeCP(); closeNav(); } });
+
+/* boot */
+applyTheme();
+render();
+</script>
+</body>
+</html>
