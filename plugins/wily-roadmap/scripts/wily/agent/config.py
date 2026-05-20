@@ -13,6 +13,7 @@ from typing import Any
 class AgentPaths:
     config_path: Path
     registry_path: Path
+    sync_health_path: Path
     plist_path: Path
     log_dir: Path
 
@@ -58,6 +59,7 @@ def default_paths(home: Path | None = None) -> AgentPaths:
     return AgentPaths(
         config_path=Path(os.environ.get("WILY_AGENT_CONFIG", config_dir / "config.json")),
         registry_path=Path(os.environ.get("WILY_AGENT_REGISTRY", config_dir / "registry.json")),
+        sync_health_path=Path(os.environ.get("WILY_AGENT_SYNC_HEALTH", config_dir / "sync-health.json")),
         plist_path=Path(os.environ.get("WILY_AGENT_PLIST", base_home / "Library" / "LaunchAgents" / "com.wily.roadmap.agent.plist")),
         log_dir=Path(os.environ.get("WILY_AGENT_LOG_DIR", base_home / "Library" / "Logs" / "wily-agent")),
     )

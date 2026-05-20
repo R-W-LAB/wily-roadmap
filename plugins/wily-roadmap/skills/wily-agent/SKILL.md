@@ -7,7 +7,9 @@ description: Use when logging in, installing, configuring, checking, starting, s
 
 Manage the local `wily-agent` daemon bundled with Wily Roadmap. It watches
 registered `.wily` repositories and sends best-effort Board v3 snapshots and
-heartbeats to Wily Board.
+heartbeats to Wily Board when a rebuilt Board URL is configured. As of
+2026-05-20, the local `wily-board` repo is deleted for a fresh rebuild, so
+missing/unreachable Board service is an expected best-effort condition.
 
 ## Internal Command
 
@@ -42,12 +44,16 @@ perform the local daemon action on the user's behalf.
 - `status` prints install, config, registry, and daemon state.
 - `check` runs a smoke check and stays best-effort when not configured.
 - `run` and `dev` run the foreground daemon path for debugging.
+- Foreground and launchd runs publish Board v3 snapshots, heartbeats,
+  status-board recovery metadata, and local sync-health state.
 
 ## Guardrails
 
 - Keep the flow local-first and approval-first.
 - Do not expose secrets in responses.
 - Do not run production Board calls unless the user explicitly configured them.
+- During the Board rebuild gap, prefer local/offline checks over login/register
+  flows that require a live Board URL.
 - Prefer `wily agent run --once --offline-ok` for smoke checks.
 - For install/start/status requests, execute the command directly and report the result.
 

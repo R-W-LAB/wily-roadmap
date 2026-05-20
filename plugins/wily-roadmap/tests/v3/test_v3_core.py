@@ -134,13 +134,57 @@ class CoreModelTest(unittest.TestCase):
         self.assertEqual(calls[0][0], "https://board.example/agent/snapshot")
         self.assertEqual(calls[1][0], "https://board.example/agent/heartbeat")
 
+    def test_agent_client_posts_t26_heartbeat_payload_in_token_mode(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_post_json(url: str, payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
+            calls.append((url, payload))
+            return {"status": 202}
+
+        original = agent_client.post_json
+        agent_client.post_json = fake_post_json
+        try:
+            config = AgentConfig(board_url="https://board.example", token="token", actor="wily", machine_id="machine-1")
+            heartbeat = {
+                "project_id": "R-W-LAB/demo",
+                "repo_slug": "R-W-LAB/demo",
+                "actor": {"id": "wily", "display": "Wily"},
+                "machine": {"hostname": "demo-host", "machine_id": "machine-1"},
+                "current_task_id": "T01",
+                "current_cp": "Implementation",
+                "status": "active",
+                "captured_at": "2026-05-20T00:00:00Z",
+            }
+
+            result = agent_client.publish_heartbeat(config, payload=heartbeat)
+        finally:
+            agent_client.post_json = original
+
+        self.assertEqual(result["sent"], True)
+        self.assertEqual(calls, [("https://board.example/agent/heartbeat", heartbeat)])
+
     def test_agent_builds_board_v3_snapshot_payload_from_local_wily_state(self) -> None:
         from wily.agent.snapshot import build_snapshot_payload, snapshot_sha
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _git_repo(root)
+            subprocess.run(["git", "branch", "-M", "main"], cwd=root, check=True)
             subprocess.run(["git", "remote", "add", "origin", "git@github.com:R-W-LAB/demo.git"], cwd=root, check=True)
+            (root / "wily-workspace.yaml").write_text(
+                "\n".join(
+                    [
+                        "schema: wily-workspace-v1",
+                        "title: Demo Workspace",
+                        "repos:",
+                        "  - id: demo",
+                        "    path: .",
+                        "    title: Demo Repo",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
             paths = WilyPaths(root)
             paths.wily_dir.mkdir()
             paths.project_md.write_text("# Demo Project\n\nLocal project notes.\n", encoding="utf-8")
@@ -166,26 +210,459 @@ class CoreModelTest(unittest.TestCase):
             init_progress(paths, "T01")
             append_event(paths, "T01", CpEvent(ts="2026-05-19T00:00:00Z", actor="wily", cp="plan", event="start"))
             append_event(paths, "T01", CpEvent(ts="2026-05-19T00:01:00Z", actor="wily", cp="plan", event="done"))
+            append_event(paths, "T01", CpEvent(ts="2026-05-19T00:02:00Z", actor="wily", cp="Implementation", event="start", note="coding"))
             paths.result_md("T01").parent.mkdir(parents=True, exist_ok=True)
             paths.result_md("T01").write_text("# Result\n\nDone locally.\n", encoding="utf-8")
 
             payload = build_snapshot_payload(root, repo="R-W-LAB/demo", actor="wily")
 
+            self.assertEqual(payload["payload_version"], "board_v3_snapshot_v1")
             self.assertEqual(payload["repo"], "R-W-LAB/demo")
             self.assertTrue(payload["remote_url"].endswith("R-W-LAB/demo.git"))
+            self.assertEqual(payload["remote"]["raw_url"], "git@github.com:R-W-LAB/demo.git")
+            self.assertEqual(payload["remote"]["normalized_url"], "https://github.com/R-W-LAB/demo")
+            self.assertEqual(payload["remote"]["owner"], "R-W-LAB")
+            self.assertEqual(payload["remote"]["name"], "demo")
+            self.assertEqual(payload["remote"]["slug"], "R-W-LAB/demo")
+            self.assertEqual(payload["repo_slug"], "R-W-LAB/demo")
+            self.assertEqual(payload["branch"], "main")
+            self.assertEqual(payload["workspace"]["title"], "Demo Workspace")
+            self.assertEqual(payload["workspace"]["repo"]["id"], "demo")
             self.assertEqual(payload["title"], "Demo Project")
             self.assertEqual(payload["mode_hint"], "solo")
             self.assertEqual(payload["local_path"], str(root.resolve()))
+            self.assertTrue(payload["machine"]["hostname"])
+            self.assertEqual(payload["machine"]["machine_id"], "")
+            self.assertEqual(payload["actor"]["id"], "wily")
+            self.assertEqual(payload["actor"]["display"], "Wily")
             self.assertEqual(payload["tasks"][0]["id"], "T01")
+            self.assertEqual(payload["tasks"][0]["actor"], "wily")
+            self.assertEqual(payload["tasks"][0]["claim_sha"], None)
+            self.assertEqual(payload["tasks"][0]["parallel_lane"], "agent")
             self.assertEqual(payload["actors"]["wily"]["display"], "Wily")
             self.assertEqual(payload["actors"]["wily"]["capacity"], 2)
             self.assertEqual(payload["task_progress"]["T01"]["done"], 1)
-            self.assertEqual(payload["task_progress"]["T01"]["total"], 1)
+            self.assertEqual(payload["task_progress"]["T01"]["total"], 2)
+            self.assertEqual(payload["task_progress"]["T01"]["current_cp"], "Implementation")
             self.assertEqual(payload["cp_events"]["T01"][0]["cp"], "plan")
+            self.assertEqual(payload["presence"]["project_id"], payload["project_id"])
+            self.assertEqual(payload["presence"]["repo_slug"], "R-W-LAB/demo")
+            self.assertEqual(payload["presence"]["current_task_id"], "T01")
+            self.assertEqual(payload["presence"]["current_cp"], "Implementation")
+            self.assertEqual(payload["presence"]["status"], "active")
+            timeline = payload["checkpoint_timeline"]["T01"]
+            self.assertEqual([row["id"] for row in timeline], ["plan", "Implementation"])
+            self.assertEqual(timeline[0]["status"], "done")
+            self.assertEqual(timeline[0]["last_update"], "2026-05-19T00:01:00Z")
+            self.assertEqual(timeline[1]["status"], "running")
+            self.assertEqual(timeline[1]["current_action"], "coding")
+            self.assertEqual(timeline[1]["verification"], "")
+            self.assertEqual(timeline[1]["status_board"], {})
+            self.assertEqual(timeline[1]["result_summary"], "Done locally.")
+            self.assertEqual(payload["recovery"]["imported_count"], 0)
+            self.assertEqual(payload["recovery"]["skipped_duplicate_count"], 0)
+            self.assertEqual(payload["recovery"]["warnings"], [])
+            self.assertIn("last_successful_push", payload["sync_health"])
+            self.assertIn("pending_snapshot_sha", payload["sync_health"])
             self.assertIn("Done locally.", payload["task_results"]["T01"])
             self.assertIn("Local project notes.", payload["project_md"])
             self.assertEqual(payload["snapshot_sha"], snapshot_sha(payload))
             self.assertTrue(payload["observed_commits"])
+
+    def test_agent_recovery_imports_missing_status_events_without_downgrading_ledger(self) -> None:
+        from wily.agent.recovery import recover_status_boards
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            init_progress(paths, "T01")
+            append_event(paths, "T01", CpEvent(ts="2026-05-18T00:00:00Z", actor="wily", cp="Plan", event="start"))
+            append_event(paths, "T01", CpEvent(ts="2026-05-18T00:01:00Z", actor="wily", cp="Plan", event="done"))
+            status = root / "agent-handoffs" / "t01-demo-status.md"
+            status.parent.mkdir()
+            status.write_text(
+                "\n".join(
+                    [
+                        "| Checkpoint | Status | Evidence |",
+                        "| --- | --- | --- |",
+                        "| Plan | BLOCKED | stale board state must not cancel done ledger cp |",
+                        "| Implementation | DONE | recovered from status board |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            report = recover_status_boards(root, actor="wily", ts="2026-05-20T00:00:00Z")
+
+            events = [(event.cp, event.event, event.note) for event in read_events(paths, "T01")]
+            self.assertEqual(events[:2], [("Plan", "start", None), ("Plan", "done", None)])
+            self.assertNotIn(("Plan", "cancel", "stale board state must not cancel done ledger cp"), events)
+            self.assertIn(("Implementation", "start", None), events)
+            self.assertIn(("Implementation", "done", "recovered from status board"), events)
+            self.assertEqual(report["imported_count"], 2)
+            self.assertGreaterEqual(report["skipped_duplicate_count"], 1)
+            self.assertEqual(report["warnings"], [])
+            self.assertEqual(report["tasks"]["T01"]["status_boards"][0]["source_path"], str(status.resolve()))
+
+    def test_agent_recovery_warns_and_imports_nothing_for_ambiguous_status_boards(self) -> None:
+        from wily.agent.recovery import recover_status_boards
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            first = root / "agent-handoffs" / "t01-alpha-status.md"
+            second = root / "agent-handoffs" / "t01-beta-status.md"
+            first.parent.mkdir()
+            for status in (first, second):
+                status.write_text("| Checkpoint | Status | Evidence |\n| --- | --- | --- |\n| Plan | DONE | ok |\n", encoding="utf-8")
+
+            report = recover_status_boards(root, actor="wily", ts="2026-05-20T00:00:00Z")
+
+            self.assertEqual(read_events(paths, "T01"), [])
+            self.assertEqual(report["imported_count"], 0)
+            self.assertTrue(any("ambiguous" in warning.lower() for warning in report["warnings"]))
+
+    def test_agent_sync_health_records_failure_success_and_pending_snapshot(self) -> None:
+        from wily.agent.sync_health import load_sync_health, record_publish_result
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "sync-health.json"
+
+            failed = record_publish_result(
+                target,
+                kind="snapshot",
+                snapshot_sha="sha-old",
+                result={"sent": False, "reason": "board down"},
+                client_version="wily-agent/0.1.0",
+                captured_at="2026-05-20T00:00:00Z",
+            )
+
+            self.assertEqual(failed["last_failed_push"], "2026-05-20T00:00:00Z")
+            self.assertEqual(failed["last_failure_reason"], "snapshot: board down")
+            self.assertEqual(failed["pending_snapshot_sha"], "sha-old")
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), failed)
+
+            recovered = record_publish_result(
+                target,
+                kind="snapshot",
+                snapshot_sha="sha-new",
+                result={"sent": True, "status": 202},
+                client_version="wily-agent/0.1.0",
+                captured_at="2026-05-20T00:01:00Z",
+            )
+
+            self.assertEqual(recovered["last_successful_push"], "2026-05-20T00:01:00Z")
+            self.assertEqual(recovered["last_failure_reason"], "")
+            self.assertEqual(recovered["pending_snapshot_sha"], "")
+            self.assertEqual(load_sync_health(target), recovered)
+
+    def test_agent_daemon_records_failure_then_reconnect_sends_latest_snapshot(self) -> None:
+        from wily.agent import daemon
+        from wily.agent.registry import RegisteredRepo
+        from wily.agent.sync_health import load_sync_health
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="Old title", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            repo = RegisteredRepo(path=root, repo="R-W-LAB/demo")
+            config = AgentConfig(board_url="https://board.example", token="token", actor="wily", machine_id="machine-1")
+            sync_health_path = root / "sync-health.json"
+            snapshots: list[dict[str, object]] = []
+            results = iter([{"sent": False, "reason": "board down"}, {"sent": True, "status": 202}])
+
+            def fake_publish_snapshot(_config: AgentConfig, payload: dict[str, object]) -> dict[str, object]:
+                snapshots.append(payload)
+                return next(results)
+
+            with patch.object(daemon, "publish_snapshot", side_effect=fake_publish_snapshot), patch.object(
+                daemon,
+                "publish_heartbeat",
+                return_value={"sent": True, "status": 202},
+            ):
+                first = daemon.publish_repo_heartbeat(config, repo, include_snapshot=True, sync_health_path=sync_health_path)
+                save_tasks(paths, "demo", [Task(id="T01", title="New title", status=TaskStatus.IN_PROGRESS, actor="wily")])
+                second = daemon.publish_repo_heartbeat(config, repo, include_snapshot=True, sync_health_path=sync_health_path)
+
+            self.assertEqual(first["snapshot"]["sent"], False)
+            self.assertEqual(second["snapshot"]["sent"], True)
+            self.assertEqual(snapshots[-1]["tasks"][0]["title"], "New title")
+            health = load_sync_health(sync_health_path)
+            self.assertEqual(health["last_failure_reason"], "")
+            self.assertEqual(health["pending_snapshot_sha"], "")
+            self.assertEqual(second["sync_health"]["last_successful_push"], health["last_successful_push"])
+
+    def test_agent_recovery_imported_by_daemon_uses_non_empty_timestamp(self) -> None:
+        from wily.agent import daemon
+        from wily.agent.registry import RegisteredRepo
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            status = root / "agent-handoffs" / "t01-demo-status.md"
+            status.parent.mkdir()
+            status.write_text("| Checkpoint | Status | Evidence |\n| --- | --- | --- |\n| Plan | DONE | recovered |\n", encoding="utf-8")
+
+            with patch.object(daemon, "publish_snapshot", return_value={"sent": True, "status": 202}), patch.object(
+                daemon,
+                "publish_heartbeat",
+                return_value={"sent": True, "status": 202},
+            ):
+                result = daemon.publish_repo_heartbeat(
+                    AgentConfig(board_url="https://board.example", token="token", actor="wily"),
+                    RegisteredRepo(path=root, repo="R-W-LAB/demo"),
+                    sync_health_path=root / "sync-health.json",
+                )
+
+            events = read_events(paths, "T01")
+            self.assertEqual(result["snapshot"]["sent"], True)
+            self.assertTrue(events)
+            self.assertTrue(all(event.ts for event in events))
+
+    def test_agent_recovery_ignores_non_checkpoint_status_tables(self) -> None:
+        from wily.agent.recovery import recover_status_boards
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            status = root / "agent-handoffs" / "t01-demo-status.md"
+            status.parent.mkdir()
+            status.write_text(
+                "\n".join(
+                    [
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP01 | DONE | Real checkpoint | root | ok |",
+                        "",
+                        "| Item | Status | Notes |",
+                        "| --- | --- | --- |",
+                        "| Superpowers routing | DONE | not a checkpoint |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            recover_status_boards(root, actor="wily", ts="2026-05-20T00:00:00Z")
+
+            self.assertEqual(
+                [(event.cp, event.event) for event in read_events(paths, "T01")],
+                [("Real checkpoint", "start"), ("Real checkpoint", "done")],
+            )
+
+    def test_agent_run_once_keeps_sync_health_isolated_per_registered_repo(self) -> None:
+        from wily.agent import daemon
+        from wily.agent.registry import RegisteredRepo, save_registry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo_a = base / "repo-a"
+            repo_b = base / "repo-b"
+            for repo_root, title in ((repo_a, "Repo A"), (repo_b, "Repo B")):
+                repo_root.mkdir()
+                _git_repo(repo_root)
+                paths = WilyPaths(repo_root)
+                paths.wily_dir.mkdir()
+                save_tasks(paths, title, [Task(id="T01", title=title, status=TaskStatus.IN_PROGRESS, actor="wily")])
+            registry = base / "registry.json"
+            save_registry(registry, [RegisteredRepo(path=repo_a, repo="R-W-LAB/a"), RegisteredRepo(path=repo_b, repo="R-W-LAB/b")])
+            snapshots: list[dict[str, object]] = []
+
+            def fake_publish_snapshot(_config: AgentConfig, payload: dict[str, object]) -> dict[str, object]:
+                snapshots.append(payload)
+                return {"sent": False, "reason": "repo a down"} if payload["repo_slug"] == "R-W-LAB/a" else {"sent": True, "status": 202}
+
+            with patch.object(daemon, "publish_snapshot", side_effect=fake_publish_snapshot), patch.object(
+                daemon,
+                "publish_heartbeat",
+                return_value={"sent": True, "status": 202},
+            ):
+                daemon.run_once(
+                    AgentConfig(board_url="https://board.example", token="token", actor="wily"),
+                    registry,
+                    sync_health_path=base / "sync-health.json",
+                )
+
+            self.assertEqual(snapshots[0]["repo_slug"], "R-W-LAB/a")
+            self.assertEqual(snapshots[1]["repo_slug"], "R-W-LAB/b")
+            self.assertEqual(snapshots[1]["sync_health"]["pending_snapshot_sha"], "")
+
+    def test_agent_legacy_live_config_does_not_record_token_snapshot_failure(self) -> None:
+        from wily.agent import daemon
+        from wily.agent.registry import RegisteredRepo
+        from wily.agent.sync_health import load_sync_health
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            health_path = root / "sync-health.json"
+
+            with patch.object(daemon, "publish_snapshot", side_effect=AssertionError("token snapshot should not run")), patch.object(
+                daemon,
+                "publish_event",
+                return_value={"sent": True, "status": 202},
+            ):
+                result = daemon.publish_repo_heartbeat(
+                    AgentConfig(board_url="https://board.example", repo="R-W-LAB/demo", actor="wily", secret="secret"),
+                    RegisteredRepo(path=root, repo="R-W-LAB/demo"),
+                    include_snapshot=True,
+                    sync_health_path=health_path,
+                )
+
+            self.assertEqual(result["snapshot"], {"sent": False, "reason": "not configured"})
+            self.assertEqual(result["heartbeat"]["sent"], True)
+            self.assertEqual(load_sync_health(health_path)["last_failure_reason"], "")
+
+    def test_agent_failed_debounced_snapshot_retries_before_fallback_window(self) -> None:
+        from wily.agent import daemon
+        from wily.agent.registry import RegisteredRepo
+
+        class StopLoop(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            repo = RegisteredRepo(path=root, repo="R-W-LAB/demo")
+            config = AgentConfig(board_url="https://board.example", token="token", actor="wily", heartbeat_interval=999)
+            times = iter([0.0, 1.0, 4.5, 5.0])
+            mtimes = iter([2.0, 2.0, 2.0])
+            sleep_calls = 0
+            current_time: float | str = "initial"
+            snapshot_publish_times: list[float | str] = []
+
+            def fake_sleep(_seconds: float) -> None:
+                nonlocal sleep_calls
+                if sleep_calls >= 3:
+                    raise StopLoop()
+                sleep_calls += 1
+
+            def fake_monotonic() -> float:
+                nonlocal current_time
+                current_time = next(times)
+                return float(current_time)
+
+            def fake_publish(_config: AgentConfig, _repo: RegisteredRepo, *, include_snapshot: bool = True, **_kwargs: object) -> dict[str, object]:
+                if include_snapshot:
+                    snapshot_publish_times.append(current_time)
+                sent = current_time != 4.5
+                return {"repo": str(root), "snapshot": {"sent": sent}, "heartbeat": {"sent": True}}
+
+            with patch.object(daemon, "load_registry", return_value=[repo]), patch.object(
+                daemon,
+                "publish_repo_heartbeat",
+                side_effect=fake_publish,
+            ), patch.object(daemon, "wily_tree_mtime", side_effect=lambda _path: next(mtimes)), patch.object(
+                daemon.time,
+                "sleep",
+                side_effect=fake_sleep,
+            ), patch.object(daemon.time, "monotonic", side_effect=fake_monotonic), patch.object(
+                daemon,
+                "SNAPSHOT_DEBOUNCE_SECONDS",
+                2.0,
+            ), patch.object(
+                daemon,
+                "SNAPSHOT_FALLBACK_SECONDS",
+                60.0,
+            ):
+                with self.assertRaises(StopLoop):
+                    daemon.run_loop(config, root / "registry.json", once=False, offline_ok=False)
+
+            self.assertEqual(snapshot_publish_times, ["initial", 4.5, 5.0])
+
+    def test_agent_snapshot_presence_is_idle_without_active_task(self) -> None:
+        from wily.agent.snapshot import build_snapshot_payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="Ready task", status=TaskStatus.READY)])
+
+            payload = build_snapshot_payload(root, repo="R-W-LAB/demo", actor="wily")
+
+            self.assertEqual(payload["presence"]["status"], "idle")
+            self.assertIsNone(payload["presence"]["current_task_id"])
+            self.assertIsNone(payload["presence"]["current_cp"])
+
+    def test_agent_daemon_debounces_wily_changes_and_sends_fallback_snapshots(self) -> None:
+        from wily.agent import daemon
+        from wily.agent.registry import RegisteredRepo
+
+        class StopLoop(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            repo = RegisteredRepo(path=root, repo="R-W-LAB/demo")
+            config = AgentConfig(board_url="https://board.example", token="token", actor="wily", heartbeat_interval=999)
+            times = iter([0.0, 1.0, 2.0, 4.5, 16.0])
+            mtimes = iter([1.0, 2.0, 2.0, 2.0])
+            sleep_calls = 0
+            current_time: float | str = "initial"
+            snapshot_publish_times: list[float | str] = []
+
+            def fake_sleep(_seconds: float) -> None:
+                nonlocal sleep_calls
+                if sleep_calls >= 4:
+                    raise StopLoop()
+                sleep_calls += 1
+
+            def fake_monotonic() -> float:
+                nonlocal current_time
+                current_time = next(times)
+                return float(current_time)
+
+            def fake_publish(_config: AgentConfig, _repo: RegisteredRepo, *, include_snapshot: bool = True, **_kwargs: object) -> dict[str, object]:
+                if include_snapshot:
+                    snapshot_publish_times.append(current_time)
+                return {"repo": str(root), "snapshot": {"sent": include_snapshot}, "heartbeat": {"sent": True}}
+
+            with patch.object(daemon, "load_registry", return_value=[repo]), patch.object(
+                daemon,
+                "publish_repo_heartbeat",
+                side_effect=fake_publish,
+            ), patch.object(daemon, "wily_tree_mtime", side_effect=lambda _path: next(mtimes)), patch.object(
+                daemon.time,
+                "sleep",
+                side_effect=fake_sleep,
+            ), patch.object(daemon.time, "monotonic", side_effect=fake_monotonic), patch.object(
+                daemon,
+                "SNAPSHOT_DEBOUNCE_SECONDS",
+                2.0,
+            ), patch.object(
+                daemon,
+                "SNAPSHOT_FALLBACK_SECONDS",
+                10.0,
+            ):
+                with self.assertRaises(StopLoop):
+                    daemon.run_loop(config, root / "registry.json", once=False, offline_ok=False)
+
+            self.assertEqual(snapshot_publish_times, ["initial", 4.5, 16.0])
 
     def test_paths_config_and_progress_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -446,6 +923,40 @@ class CoreModelTest(unittest.TestCase):
             ])
             summary = cp_summary(paths, "T01")
             self.assertEqual((summary.total, summary.done, summary.current_cp), (3, 2, "Implementation"))
+
+    def test_cp_import_status_uses_custom_workflow_checkpoint_column_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            paths = WilyPaths(root)
+            paths.wily_dir.mkdir()
+            save_actors(paths, [Actor(id="wily", display="Wily", git_author_emails=["wily@example.com"])])
+            save_tasks(paths, "demo", [Task(id="T01", title="First", status=TaskStatus.IN_PROGRESS, actor="wily")])
+            status = root / "agent-handoffs" / "demo-status.md"
+            status.parent.mkdir()
+            status.write_text(
+                "\n".join(
+                    [
+                        "| ID | Status | Checkpoint | Owner | Evidence |",
+                        "| --- | --- | --- | --- | --- |",
+                        "| CP01 | DONE | Baseline and contract tests | root | ok |",
+                        "| CP02 | RUNNING | Snapshot identity and timeline | root | current |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with chdir_compat(root):
+                self.assertEqual(cp_cmd.main(["T01", "import-status", str(status.relative_to(root)), "--actor", "wily"]), 0)
+
+            self.assertEqual(
+                [(event.cp, event.event, event.note) for event in read_events(paths, "T01")],
+                [
+                    ("Baseline and contract tests", "start", None),
+                    ("Baseline and contract tests", "done", "ok"),
+                    ("Snapshot identity and timeline", "start", None),
+                ],
+            )
 
     def test_cp_import_status_uses_task_handoff_default_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

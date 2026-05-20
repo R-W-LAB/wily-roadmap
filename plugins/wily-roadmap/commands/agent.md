@@ -1,6 +1,8 @@
 # wily-agent
 
 Use `wily agent` to install and manage the bundled Wily Board v3 sync daemon.
+As of 2026-05-20, the local `wily-board` repo is deleted for a fresh rebuild;
+login/register flows require a rebuilt Board URL.
 
 In Codex, users can ask through the plugin command without knowing the plugin
 filesystem path:
@@ -28,5 +30,10 @@ wily agent unregister
 ```
 
 The daemon is local-first and best-effort. It publishes Board v3 snapshots and
-heartbeats when logged in. Missing config, Board downtime, invalid tokens, or
-legacy signature errors must not fail normal Wily task commands.
+heartbeats when logged in to a rebuilt Board. Missing config, Board downtime,
+invalid tokens, the current Board rebuild gap, or legacy signature errors must
+not fail normal Wily task commands.
+
+Each snapshot includes status-board recovery metadata from task-related Custom
+Workflow boards and local sync-health fields for the last successful push, last
+failure reason, and pending snapshot marker.
