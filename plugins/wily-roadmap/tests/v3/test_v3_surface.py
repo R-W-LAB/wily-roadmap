@@ -54,6 +54,9 @@ class V3SurfaceTest(unittest.TestCase):
             self.assertIn(token, skill)
         self.assertIn("local-first", skill)
         self.assertIn("approval-first", skill)
+        for token in ("status-board recovery", "sync-health", "Board v3 snapshots", "heartbeats"):
+            self.assertIn(token, command)
+            self.assertIn(token, skill)
 
     def test_plugin_manifest_and_readme_document_agent_onboarding(self) -> None:
         data = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))

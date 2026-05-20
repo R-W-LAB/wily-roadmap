@@ -182,7 +182,7 @@ def _dev(args: list[str]) -> int:
     paths = default_paths()
     config_path = Path(values.get("--config", str(paths.config_path)))
     registry_path = Path(values.get("--registry", str(paths.registry_path)))
-    results = run_loop(load_config(config_path), registry_path, once="--once" in args, offline_ok="--offline-ok" in args)
+    results = run_loop(load_config(config_path), registry_path, once="--once" in args, offline_ok="--offline-ok" in args, sync_health_path=paths.sync_health_path)
     _common.emit_json({"results": results}) if "--json" in args else _common.emit_text(f"wily-agent dev tick: {len(results)} repo(s)")
     return _common.EXIT_OK
 
@@ -212,6 +212,7 @@ def status_payload() -> dict[str, Any]:
         "configured": config.configured,
         "config": config.public_dict(),
         "registry": {"path": str(paths.registry_path), "repos": [repo.to_dict() for repo in repos]},
+        "sync_health": {"path": str(paths.sync_health_path), "exists": paths.sync_health_path.exists()},
         "launchd": {"label": LABEL, "plist": str(paths.plist_path), "plist_exists": paths.plist_path.exists()},
         "daemon": {"running": _launchctl_running()},
     }

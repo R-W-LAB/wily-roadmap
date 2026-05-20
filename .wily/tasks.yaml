@@ -618,10 +618,10 @@ tasks:
   - plugins/wily-roadmap/commands/agent.md
   depends_on:
   - T26
-  status: ready
+  status: done
   assignee: wily
-  actor: null
-  claim_sha: null
-  claim_at: null
-  done_at: null
+  actor: wily
+  claim_sha: 64dda1f23ec920127dd31087c966f2693f1cb031
+  claim_at: '2026-05-20T12:23:23Z'
+  done_at: '2026-05-20T13:17:29Z'
   blocker: null

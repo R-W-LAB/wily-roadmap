@@ -1,0 +1,14 @@
+{"ts": "2026-05-20T12:26:18Z", "actor": "wily", "cp": "planning-package", "event": "start"}
+{"ts": "2026-05-20T12:41:08Z", "actor": "wily", "cp": "planning-package", "event": "done"}
+{"ts": "2026-05-20T12:45:12Z", "actor": "wily", "cp": "Baseline and contract tests", "event": "start"}
+{"ts": "2026-05-20T12:48:57Z", "actor": "wily", "cp": "Baseline and contract tests", "event": "done"}
+{"ts": "2026-05-20T12:50:23Z", "actor": "wily", "cp": "Snapshot identity and timeline", "event": "start"}
+{"ts": "2026-05-20T12:56:33Z", "actor": "wily", "cp": "Snapshot identity and timeline", "event": "done"}
+{"ts": "2026-05-20T12:56:37Z", "actor": "wily", "cp": "Status-board recovery", "event": "start"}
+{"ts": "2026-05-20T12:58:08Z", "actor": "wily", "cp": "Status-board recovery", "event": "done"}
+{"ts": "2026-05-20T12:58:08Z", "actor": "wily", "cp": "Heartbeat and sync health", "event": "start"}
+{"ts": "2026-05-20T12:58:48Z", "actor": "wily", "cp": "Heartbeat and sync health", "event": "done"}
+{"ts": "2026-05-20T12:58:48Z", "actor": "wily", "cp": "CLI/docs and smoke", "event": "start"}
+{"ts": "2026-05-20T13:13:53.746227Z", "actor": "wily", "cp": "Requirements and execution package", "event": "start"}
+{"ts": "2026-05-20T13:13:53.746227Z", "actor": "wily", "cp": "Requirements and execution package", "event": "done", "note": "requirements/package/status/progress files created"}
+{"ts": "2026-05-20T13:16:21Z", "actor": "wily", "cp": "CLI/docs and smoke", "event": "done"}

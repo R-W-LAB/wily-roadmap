@@ -106,28 +106,37 @@ def events_from_status_board(text: str, *, actor: str, ts: str) -> list[CpEvent]
 def parse_status_board(text: str, *, actor: str, ts: str) -> tuple[list[CpEvent], list[str]]:
     events: list[CpEvent] = []
     unrecognized: list[str] = []
+    mode: str | None = None
     for line in text.splitlines():
         cells = _markdown_cells(line)
         if len(cells) < 2:
+            mode = None
             if line.strip() and not line.lstrip().startswith("#"):
                 unrecognized.append(line)
             continue
-        checkpoint, status = cells[0], cells[1].upper()
-        if checkpoint.lower() in {"checkpoint", "ac", "acceptance", "acceptance criteria"} or set(status) <= {"-"}:
+        detected = _status_table_mode(cells)
+        if detected:
+            mode = detected
+            continue
+        if set(cells[0]) <= {"-"} or set(cells[1]) <= {"-"}:
+            continue
+        if mode is None:
+            continue
+        checkpoint, status, evidence = _checkpoint_status_evidence(cells, mode=mode)
+        if checkpoint.lower() in {"checkpoint", "ac", "acceptance", "acceptance criteria"}:
             continue
         if checkpoint.isdigit() and status.lower() in {"pass", "fail"}:
-            evidence = cells[2] if len(cells) > 2 else ""
             events.append(AcCheck(ts=ts, actor=actor, index=int(checkpoint), status=status.lower(), evidence=evidence).to_event())
             continue
         if not checkpoint or not status:
             continue
         if status == "DONE":
             events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="start"))
-            events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="done"))
+            events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="done", note=evidence or None))
         elif status in {"RUNNING", "VERIFYING", "PARTIAL", "BLOCKED"}:
             events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="start"))
             if status == "BLOCKED":
-                events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="cancel", note=cells[2] if len(cells) > 2 else None))
+                events.append(CpEvent(ts=ts, actor=actor, cp=checkpoint, event="cancel", note=evidence or None))
         else:
             unrecognized.append(line)
     return events, unrecognized
@@ -159,6 +168,28 @@ def _markdown_cells(line: str) -> list[str]:
     if not stripped.startswith("|") or not stripped.endswith("|"):
         return []
     return [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
+
+
+def _status_table_mode(cells: list[str]) -> str | None:
+    lowered = [cell.lower() for cell in cells]
+    if len(lowered) >= 3 and lowered[0] == "id" and lowered[1] == "status" and lowered[2] == "checkpoint":
+        return "custom-workflow"
+    if len(lowered) >= 2 and lowered[0] in {"checkpoint", "cp"} and lowered[1] in {"status", "state"}:
+        return "checkpoint"
+    if len(lowered) >= 2 and lowered[0] in {"ac", "acceptance", "acceptance criteria"} and lowered[1] == "status":
+        return "acceptance"
+    return None
+
+
+def _checkpoint_status_evidence(cells: list[str], *, mode: str) -> tuple[str, str, str]:
+    if mode == "custom-workflow" and len(cells) >= 3:
+        status = cells[1].upper()
+        if status in {"DONE", "RUNNING", "VERIFYING", "PARTIAL", "BLOCKED", "TODO", "PENDING"}:
+            evidence = cells[4] if len(cells) > 4 else ""
+            return cells[2], status, evidence
+    checkpoint, status = cells[0], cells[1].upper()
+    evidence = cells[2] if len(cells) > 2 else ""
+    return checkpoint, status, evidence
 
 
 def cp_summary(paths: WilyPaths, task_id: str) -> CpSummary:

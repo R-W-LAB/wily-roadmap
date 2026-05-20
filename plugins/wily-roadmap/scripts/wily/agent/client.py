@@ -69,16 +69,18 @@ def publish_snapshot(config: AgentConfig, payload: dict[str, Any], timeout: floa
 def publish_heartbeat(
     config: AgentConfig,
     *,
-    project_id: str,
-    current_task_id: str | None,
+    project_id: str = "",
+    current_task_id: str | None = None,
+    payload: dict[str, Any] | None = None,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
     if not config.snapshot_configured:
         return {"sent": False, "reason": "not logged in"}
+    heartbeat = payload or {"project_id": project_id, "current_task_id": current_task_id, "actor": config.actor}
     return sent_result(
         post_json(
             config.board_url.rstrip("/") + "/agent/heartbeat",
-            {"project_id": project_id, "current_task_id": current_task_id, "actor": config.actor},
+            heartbeat,
             token=config.token,
             timeout=timeout,
         )
