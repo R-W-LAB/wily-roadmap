@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "wily.py"
@@ -31,7 +32,7 @@ from wily.scheduling import parallel_candidates, waiting_candidates  # noqa: E40
 from wily.transitions import DependencyError, TransitionError, apply_block, apply_claim, apply_done, check_dependencies  # noqa: E402
 from wily.ui.watch_layout import WatchLayoutConfig  # noqa: E402
 from wily.ui.watch_activity import build_activity_lines  # noqa: E402
-from wily.ui.watch_render import render_watch  # noqa: E402
+from wily.ui.watch_render import _display_width, render_watch  # noqa: E402
 
 
 def _git_repo(path: Path) -> None:
@@ -203,6 +204,8 @@ class CoreModelTest(unittest.TestCase):
             summary = cp_summary(paths, "T01")
             self.assertEqual((summary.total, summary.done), (1, 1))
             self.assertEqual(summary.cp_names, ["plan"])
+            self.assertEqual(summary.done_cp_names, ["plan"])
+            self.assertEqual(summary.last_event_at, "2026-05-18T00:01:00Z")
             self.assertEqual(paths.handoff_dir("T01"), root / ".wily" / "handoffs" / "T01")
             self.assertEqual(paths.handoff_status_md("T01"), root / ".wily" / "handoffs" / "T01" / "status.md")
             touch_wily(paths)
@@ -740,6 +743,36 @@ class CoreModelTest(unittest.TestCase):
         self.assertIn("체크포인트 [#--] 1/3 현재:verify", output)
         self.assertIn("차단 사유: waiting for review", output)
 
+    def test_watch_renderer_ascii_timeline_marks_done_current_and_pending(self) -> None:
+        output = render_watch(
+            project_title="Demo",
+            tasks=[
+                Task(
+                    id="T01",
+                    title="Timeline",
+                    status=TaskStatus.IN_PROGRESS,
+                    assignee="wily",
+                ),
+            ],
+            actors=[],
+            observed_commits=[],
+            cp_summaries={
+                "T01": CpSummary(
+                    total=3,
+                    done=1,
+                    in_progress=1,
+                    current_cp="verify",
+                    cp_names=["plan", "verify", "ship"],
+                    done_cp_names=["plan"],
+                )
+            },
+            mode="solo",
+            ui="ascii",
+            show_timeline=True,
+        )
+
+        self.assertIn("[plan] > {verify} > ship", output)
+
     def test_watch_renderer_groups_tasks_by_status(self) -> None:
         output = render_watch(
             project_title="Demo",
@@ -911,7 +944,16 @@ class CoreModelTest(unittest.TestCase):
                 Task(id="T01", title="First", status=TaskStatus.DONE, actor="wily", done_at="2026-05-18T10:00:00Z"),
                 Task(id="T02", title="Second", status=TaskStatus.IN_PROGRESS, actor="wily", assignee="wily"),
             ],
-            cp_summaries={"T02": CpSummary(total=1, done=0, in_progress=1, current_cp="verify", cp_names=["verify"])},
+            cp_summaries={
+                "T02": CpSummary(
+                    total=1,
+                    done=0,
+                    in_progress=1,
+                    current_cp="verify",
+                    cp_names=["verify"],
+                    last_event_at="2026-05-18T11:00:00Z",
+                )
+            },
             ascii_mode=True,
             width=30,
         )
@@ -919,13 +961,77 @@ class CoreModelTest(unittest.TestCase):
         self.assertIn("활동", text)
         self.assertIn("wily", text)
         self.assertIn("현재: T02 verify", text)
+        self.assertIn("최근 활동: 2026-05-18T11:00:00Z", text)
         self.assertIn("최근 완료: T01", text)
 
-    def test_watch_status_args_strip_new_flags(self) -> None:
+    def test_render_watch_wide_width_includes_activity_panel(self) -> None:
+        with patch("wily.ui.watch_render.get_terminal_size", return_value=os.terminal_size((132, 40))):
+            output = render_watch(
+                project_title="Demo",
+                tasks=[
+                    Task(id="T01", title="진행 중인 한글 작업", status=TaskStatus.IN_PROGRESS, actor="wily"),
+                    Task(id="T02", title="완료된 작업", status=TaskStatus.DONE, actor="wily", done_at="2026-05-18T10:00:00Z"),
+                ],
+                actors=[Actor(id="wily", display="Wily", capacity=2)],
+                observed_commits=[],
+                cp_summaries={},
+                mode="collab",
+                ui="ascii",
+            )
+
+        self.assertIn(" | 활동", output)
+        self.assertIn("현재: T01", output)
+        self.assertIn("여력: 1/2", output)
+        for line in output.splitlines():
+            self.assertLessEqual(len(line), 132)
+
+    def test_render_watch_rich_wide_activity_panel_does_not_raise_on_mixed_styles(self) -> None:
+        with patch("wily.ui.watch_render.get_terminal_size", return_value=os.terminal_size((132, 40))):
+            output = render_watch(
+                project_title="Demo",
+                tasks=[
+                    Task(id="T01", title="진행 중인 한글 작업", status=TaskStatus.IN_PROGRESS, actor="wily"),
+                    Task(id="T02", title="완료된 작업", status=TaskStatus.DONE, actor="wily", done_at="2026-05-18T10:00:00Z"),
+                ],
+                actors=[Actor(id="wily", display="Wily", capacity=2)],
+                observed_commits=[],
+                cp_summaries={},
+                mode="collab",
+                ui="rich",
+            )
+
+        self.assertIn("활동", output)
+        self.assertIn("현재: T01", output)
+
+    def test_render_watch_compact_width_does_not_exceed_terminal_width(self) -> None:
+        with patch("wily.ui.watch_render.get_terminal_size", return_value=os.terminal_size((72, 24))):
+            output = render_watch(
+                project_title="Demo",
+                tasks=[
+                    Task(
+                        id="T01",
+                        title="한글 제목이 아주 길어도 compact watch 출력 폭을 넘기지 않아야 한다",
+                        status=TaskStatus.IN_PROGRESS,
+                        actor="wily",
+                        claim_at="2026-05-18T10:00:00Z",
+                    )
+                ],
+                actors=[],
+                observed_commits=[],
+                cp_summaries={},
+                mode="solo",
+                ui="ascii",
+                compact=True,
+            )
+
+        for line in output.splitlines():
+            self.assertLessEqual(_display_width(line), 72)
+
+    def test_watch_status_args_forward_render_flags(self) -> None:
         stripped = watch_cmd.status_args_from_watch_args(
             ["--here", "--interval", "1", "--ui", "ascii", "--dry-run-pane", "--no-interactive", "--compact", "--show-timeline", "--hide-log"]
         )
-        self.assertEqual(stripped, ["--ui", "ascii"])
+        self.assertEqual(stripped, ["--ui", "ascii", "--compact", "--show-timeline", "--hide-log"])
 
     def test_tmux_watch_command_passes_new_flags(self) -> None:
         root = Path("/tmp/demo repo")

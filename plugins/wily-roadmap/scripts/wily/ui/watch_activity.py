@@ -37,6 +37,8 @@ def build_activity_lines(
             cp_text = f" {cp.current_cp}" if cp and cp.current_cp else ""
             more = f" 외 {len(current_tasks) - 1}" if len(current_tasks) > 1 else ""
             lines.append((f"  현재: {current_task.id}{cp_text}{more}", "cyan"))
+            if cp and cp.last_event_at:
+                lines.append((f"  최근 활동: {cp.last_event_at}", "dim"))
         else:
             lines.append(("  현재: —", "dim"))
         capacity = max(actor.capacity, 1)

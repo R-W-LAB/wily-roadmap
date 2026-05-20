@@ -49,6 +49,8 @@ def build_snapshot_payload(path: Path, *, repo: str = "", actor: str = "") -> di
                 "total": summary.total,
                 "current_cp": summary.current_cp,
                 "cp_names": summary.cp_names,
+                "done_cp_names": summary.done_cp_names,
+                "last_event_at": summary.last_event_at,
             }
             for task in tasks
         },

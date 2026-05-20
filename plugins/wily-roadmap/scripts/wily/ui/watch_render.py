@@ -69,11 +69,31 @@ def _truncate(text: str, width: int) -> str:
     return text[: width - 1] + "…"
 
 
+def _truncate_display(text: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if _display_width(text) <= width:
+        return text
+    out = ""
+    used = 0
+    for char in text:
+        char_width = 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+        if used + char_width > width - 1:
+            break
+        out += char
+        used += char_width
+    return out + "…"
+
+
 def _display_width(text: str) -> int:
     total = 0
     for char in text:
         total += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
     return total
+
+
+def _pad_display(text: str, width: int) -> str:
+    return text + " " * max(0, width - _display_width(text))
 
 
 def _meta_for_task(task: Task) -> str | None:
@@ -208,12 +228,12 @@ def build_grouped_rows(
             current = f" 현재:{cp.current_cp}" if cp.current_cp else ""
             gauge = f"{left}{blocks}{right} {cp.done}/{cp.total}{current}"
             if show_timeline and cp.cp_names:
+                done_set = set(cp.done_cp_names)
                 if ascii_mode:
                     timeline_parts = []
                     for name in cp.cp_names:
                         if timeline_parts:
                             timeline_parts.append(">")
-                        done_set = {e.cp for e in []}
                         is_done = name in done_set
                         is_current = cp.current_cp == name
                         if is_done:
@@ -228,14 +248,16 @@ def build_grouped_rows(
                     for name in cp.cp_names:
                         if timeline_parts:
                             timeline_parts.append(" › ")
+                        is_done = name in done_set
                         is_current = cp.current_cp == name
-                        if is_current:
-                            timeline_parts.append(name)
+                        if is_done:
+                            timeline_parts.append(f"[{name}]")
+                        elif is_current:
+                            timeline_parts.append(f"{{{name}}}")
                         else:
                             timeline_parts.append(name)
                     timeline = "".join(timeline_parts)
                     if cp.current_cp and cp.current_cp in cp.cp_names:
-                        idx = cp.cp_names.index(cp.current_cp)
                         timeline += f"  ↑ {cp.current_cp}"
         glyph, status_label, style = meta[task.status]
         row = WatchRow(
@@ -350,6 +372,8 @@ def render_watch(
                 body,
             ]
         )
+    if rich_enabled:
+        return _render_rich(lines)
     return body
 
 
@@ -362,7 +386,7 @@ def _header_lines(
 ) -> list[tuple[str, str]]:
     rule = "-" if ascii_mode else "─"
     return [
-        (f"Wily Roadmap v3  {project_title or '(제목 없음)'}", "bold"),
+        (_truncate_display(f"Wily Roadmap v3  {project_title or '(제목 없음)'}", width), "bold"),
         (rule * width, "dim"),
     ]
 
@@ -495,41 +519,41 @@ def _task_section_lines(
         prefix = f"{rule}{rule} {label} "
         fill = rule * max(0, width - _display_width(prefix) - 1)
         header_text = f"{prefix}{fill}"
-        lines.append((header_text[:width], "dim"))
+        lines.append((_truncate_display(header_text, width), "dim"))
     for index, row in enumerate(rows):
         branch = "\\-" if ascii_mode and index == len(rows) - 1 else "+-" if ascii_mode else "└─" if index == len(rows) - 1 else "├─"
-        title = _truncate(row.title, max_title_width)
+        title = _truncate_display(row.title, max_title_width)
         meta = row.meta_text or ""
         line = f"{branch} {row.glyph} {row.task_id:<5} {row.status_label:<12} {row.actor_display:<10} {title}"
         if meta and not compact:
-            remaining = width - len(line) - 1
+            remaining = width - _display_width(line) - 1
             if remaining > 10:
-                line += " " + meta[:remaining]
-        lines.append((line, row.style))
+                line += " " + _truncate_display(meta, remaining)
+        lines.append((_truncate_display(line, width), row.style))
         detail_texts = [row.parallel_text, row.capacity_text, row.conflict_text]
         for detail in [item for item in detail_texts if item]:
             rail = " " if index == len(rows) - 1 else "|" if ascii_mode else "│"
             style = "red" if detail.startswith("충돌 가능") else "cyan"
-            lines.append((f"{rail}    {detail}", style))
+            lines.append((_truncate_display(f"{rail}    {detail}", width), style))
         if row.cp_gauge:
             rail = " " if index == len(rows) - 1 else "|" if ascii_mode else "│"
             cp_line = f"{rail}    체크포인트 {row.cp_gauge}"
             if row.cp_timeline and show_timeline:
-                remaining = width - len(cp_line) - 2
+                remaining = width - _display_width(cp_line) - 2
                 if remaining > 10:
-                    cp_line += "  " + row.cp_timeline[:remaining]
-            lines.append((cp_line, "green"))
+                    cp_line += "  " + _truncate_display(row.cp_timeline, remaining)
+            lines.append((_truncate_display(cp_line, width), "green"))
         if row.blocker:
             rail = " " if index == len(rows) - 1 else "|" if ascii_mode else "│"
             blocker_prefix = "! " if ascii_mode else ""
-            lines.append((f"{rail}    {blocker_prefix}차단 사유: {row.blocker}", "red"))
+            lines.append((_truncate_display(f"{rail}    {blocker_prefix}차단 사유: {row.blocker}", width), "red"))
         if row.dependency_text:
             rail = " " if index == len(rows) - 1 else "|" if ascii_mode else "│"
-            lines.append((f"{rail}    {row.dependency_text}", "yellow"))
+            lines.append((_truncate_display(f"{rail}    {row.dependency_text}", width), "yellow"))
         if row.guessed_text:
             rail = " " if index == len(rows) - 1 else "|" if ascii_mode else "│"
             child = "\\-" if ascii_mode else "└─"
-            lines.append((f"{rail}    {child} {row.guessed_text}", "dim"))
+            lines.append((_truncate_display(f"{rail}    {child} {row.guessed_text}", width), "dim"))
     return lines
 
 
@@ -556,7 +580,7 @@ def _observed_lines(
     for commit in observed_commits[:10]:
         sha = commit.sha[:7]
         line = f"{'>' if ascii_mode else '⏵'} {sha}  {commit.author_email:<20}  \"{commit.subject[:40]}\""
-        lines.append((line, "dim"))
+        lines.append((_truncate_display(line, width), "dim"))
     return lines
 
 
@@ -611,37 +635,44 @@ def _merge_panels(
     merged: list[tuple[str, str]] = []
     max_left = 0
     for text, _ in left:
-        max_left = max(max_left, len(text))
+        max_left = max(max_left, _display_width(text))
     left_width = min(max_left + 2, width // 2)
-    right_start = left_width + 1
+    divider = " | "
+    right_width = max(0, width - left_width - len(divider))
     for i in range(max(len(left), len(right))):
         left_text = left[i][0] if i < len(left) else ""
         right_text = right[i][0] if i < len(right) else ""
         left_style = left[i][1] if i < len(left) else ""
         right_style = right[i][1] if i < len(right) else ""
-        pad = left_width - len(left_text)
-        combined = left_text + " " * max(1, pad) + right_text
+        left_cell = _pad_display(_truncate_display(left_text, left_width), left_width)
+        right_cell = _truncate_display(right_text, right_width)
+        combined = left_cell + divider + right_cell
         if right_text and left_text:
-            merged.append((combined, f"{left_style};{right_style}" if left_style and right_style else (left_style or right_style)))
+            merged.append((combined, _merged_panel_style(left_style, right_style)))
         elif left_text:
-            merged.append((left_text, left_style))
+            merged.append((left_cell.rstrip(), left_style))
         else:
-            merged.append((" " * right_start + right_text, right_style))
+            merged.append((" " * left_width + divider + right_cell, right_style))
     return merged
+
+
+def _merged_panel_style(left_style: str, right_style: str) -> str:
+    if left_style == right_style:
+        return left_style
+    return left_style or right_style
 
 
 def _render_rich(lines: list[tuple[str, str]]) -> str:
     from rich.console import Console
 
     sink = StringIO()
-    width = max(get_terminal_size((96, 24)).columns, *(len(text) for text, _style in lines), 96)
+    width = max(get_terminal_size((96, 24)).columns, *(_display_width(text) for text, _style in lines), 96)
     console = Console(
         file=sink,
-        record=True,
         force_terminal=True,
         color_system="truecolor",
         width=width,
     )
     for text, style in lines:
-        console.print(text, style=style or None)
-    return console.export_text(styles=False).rstrip("\n")
+        console.print(text, style=style or None, highlight=False, soft_wrap=True)
+    return sink.getvalue().rstrip("\n")

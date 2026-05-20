@@ -115,7 +115,7 @@ def status_args_from_watch_args(args: list[str]) -> list[str]:
         if skip_next:
             skip_next = False
             continue
-        if arg in {"--once", "--here", "--dry-run-pane", "--no-interactive", "--compact", "--show-timeline", "--hide-log"}:
+        if arg in {"--once", "--here", "--dry-run-pane", "--no-interactive"}:
             continue
         if arg == "--interval":
             skip_next = True

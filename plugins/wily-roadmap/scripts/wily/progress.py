@@ -57,6 +57,8 @@ class CpSummary:
     in_progress: int
     current_cp: str | None
     cp_names: list[str] = field(default_factory=list)
+    done_cp_names: list[str] = field(default_factory=list)
+    last_event_at: str | None = None
 
 
 def init_progress(paths: WilyPaths, task_id: str) -> None:
@@ -180,5 +182,11 @@ def cp_summary(paths: WilyPaths, task_id: str) -> CpSummary:
             current = event.cp
             break
     return CpSummary(
-        total=len(started), done=len(done), in_progress=len(active), current_cp=current, cp_names=cp_order
+        total=len(started),
+        done=len(done),
+        in_progress=len(active),
+        current_cp=current,
+        cp_names=cp_order,
+        done_cp_names=[cp for cp in cp_order if cp in done],
+        last_event_at=events[-1].ts if events else None,
     )
