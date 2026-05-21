@@ -1622,6 +1622,46 @@ class CoreModelTest(unittest.TestCase):
             self.assertEqual(payload["task"]["status"], "done")
             self.assertIn("roadmap:src/app.py", paths.result_md("T01").read_text(encoding="utf-8"))
 
+    def test_coordination_done_rejects_drift_stub_in_parent_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "workspace"
+            parent.mkdir()
+            child = parent / "wily-roadmap"
+            child.mkdir()
+            _git_repo(child)
+            _write_coordination(parent)
+            paths = WilyPaths(parent)
+            save_actors(paths, [Actor(id="wily", display="Wily")])
+            save_tasks(
+                paths,
+                "Parent Project",
+                [Task(id="T01", title="Parent task", intent="do it", acceptance="done", scope=["roadmap:src/**"])],
+            )
+            claim = subprocess.run(
+                [sys.executable, str(SCRIPT), "claim", "T01", "--as", "wily", "--json"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(claim.returncode, 0, claim.stderr)
+            (child / "docs").mkdir()
+            (child / "docs" / "outside.md").write_text("outside\n", encoding="utf-8")
+
+            done = subprocess.run(
+                [sys.executable, str(SCRIPT), "done", "T01", "--stub-drift"],
+                cwd=parent,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(done.returncode, 3)
+            self.assertIn("--stub-drift is not supported in coordination mode", done.stderr)
+            _, tasks = load_tasks(paths)
+            self.assertEqual([task.id for task in tasks], ["T01"])
+            self.assertEqual(tasks[0].status, TaskStatus.IN_PROGRESS)
+            self.assertFalse(paths.result_md("T01").exists())
+            self.assertFalse(paths.task_dir("T02").exists())
+
     def test_coordination_cp_status_next_and_watch_use_parent_tasks_and_expose_active_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp) / "workspace"
@@ -3713,6 +3753,23 @@ class CliLifecycleTest(unittest.TestCase):
             stubs = [task for task in tasks if task.title.startswith("drift:")]
             self.assertEqual(len(stubs), 1)
             self.assertEqual(stubs[0].scope, ["docs/outside.md"])
+
+    def test_replan_drift_guard_skips_coordination_parent_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_repo(root)
+            _write_coordination(root)
+            paths = WilyPaths(root)
+            save_tasks(paths, "demo", [Task(id="T01", title="Parent ready", scope=["roadmap:src/**"])])
+            (root / "outside.md").write_text("outside\n", encoding="utf-8")
+            subprocess.run(["git", "add", "outside.md"], cwd=root, check=True)
+
+            with chdir_compat(root):
+                self.assertEqual(replan_cmd.main(["drift-guard", "--from-hook"]), 0)
+
+            _, tasks = load_tasks(paths)
+            self.assertEqual([task.id for task in tasks], ["T01"])
+            self.assertFalse(paths.task_dir("T02").exists())
 
     def test_replan_installs_opt_in_pre_commit_drift_hook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

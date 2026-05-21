@@ -280,6 +280,8 @@ def _drift_guard(root: Path, paths: WilyPaths, args: list[str]) -> int:
     if "--from-hook" not in args:
         _common.emit_error("usage: wily replan drift-guard --from-hook")
         return _common.EXIT_USAGE
+    if (paths.wily_dir / "coordination.yaml").is_file():
+        return _common.EXIT_OK
     try:
         stub = run_pre_commit_guard(root, paths)
     except Exception as exc:

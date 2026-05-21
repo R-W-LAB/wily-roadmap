@@ -29,6 +29,7 @@ python3 <plugin-root>/scripts/wily.py replan [add|revise-task|drop|assign|projec
 - Natural-language work requests must produce Roadmap Task changes, not direct code or document changes.
 - `install-pre-commit-hook` is opt-in and installs a local git pre-commit drift guard.
 - The drift guard may create an in-progress `drift: <summary>` task for staged files when there is no active claim or staged files fall outside the active claim scope.
+- In parent-owned coordination mode, the drift guard skips automatic `drift: <summary>` task creation.
 - Hook-created drift tasks leave intent and acceptance blank so the user can later refine them with `replan revise-task`.
 
 ## Response Style

@@ -26,7 +26,7 @@ HELP = "\n".join(
         "  --observed          infer actor from observed commits",
         "  --force             bypass transition or scope checks",
         "  --add-scope         add detected changed files to task scope",
-        "  --stub-drift        create/reuse a drift task for out-of-scope files",
+        "  --stub-drift        create/reuse a drift task for out-of-scope files (single-repo mode only)",
         "  --json              emit the updated task as JSON",
     ]
 )
@@ -64,6 +64,9 @@ def main(args: list[str]) -> int:
     if task is None:
         _common.emit_error(f"task not found: {task_id}")
         return _common.EXIT_FAILURE
+    if stub_drift and context.active_mode == "coordination":
+        _emit_coordination_stub_drift_error()
+        return _common.EXIT_TRANSITION
     current_sha = "?"
     changed: list[str] = []
     if context.active_mode == "coordination" and task.claim_snapshot:
@@ -84,7 +87,7 @@ def main(args: list[str]) -> int:
         elif stub_drift:
             ensure_drift_stub(root, paths, project_title, tasks, outside_scope)
         else:
-            _emit_scope_drift_error(task_id, outside_scope)
+            _emit_scope_drift_error(task_id, outside_scope, context=context)
             return _common.EXIT_TRANSITION
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
@@ -239,10 +242,18 @@ def _extend_scope(scope: list[str], files: list[str]) -> list[str]:
     return result
 
 
-def _emit_scope_drift_error(task_id: str, outside_scope: list[str]) -> None:
+def _emit_coordination_stub_drift_error() -> None:
+    _common.emit_error("--stub-drift is not supported in coordination mode")
+    _common.emit_error("use --add-scope to include the files in the current parent task, or rerun without --stub-drift to review the drift")
+
+
+def _emit_scope_drift_error(task_id: str, outside_scope: list[str], *, context: ProjectContext | None = None) -> None:
     _common.emit_error(f"scope drift detected for {task_id}: {len(outside_scope)} file(s) outside scope")
     for file in outside_scope[:10]:
         _common.emit_error(f"  - {file}")
     if len(outside_scope) > 10:
         _common.emit_error(f"  ... {len(outside_scope) - 10} more")
-    _common.emit_error("rerun with --add-scope to include them in this task, or --stub-drift to create/reuse a drift helper task")
+    if context and context.active_mode == "coordination":
+        _common.emit_error("rerun with --add-scope to include them in this parent task; drift helper tasks are not created in coordination mode")
+    else:
+        _common.emit_error("rerun with --add-scope to include them in this task, or --stub-drift to create/reuse a drift helper task")

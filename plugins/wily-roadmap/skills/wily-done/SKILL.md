@@ -18,12 +18,15 @@ python3 <plugin-root>/scripts/wily.py done <id> [--note <text>|--observed|--forc
 - State-changing: flips status to done and writes result metadata.
 - Does not run a verification gate; the user's command is the closure signal.
 - Before marking done, compares files changed since `claim_sha` against task scope.
-- If scope drift exists, default behavior blocks done and asks the user to choose either `--add-scope` or `--stub-drift`.
+- If scope drift exists, default behavior blocks done and asks the user to choose an allowed reconciliation mode.
 - `--add-scope` records outside-scope files on the current task before closing it.
-- `--stub-drift` creates or reuses a `drift: <summary>` helper task so the drift is tracked without duplicate stubs.
+- In single-repo mode, `--stub-drift` creates or reuses a `drift: <summary>` helper task so the drift is tracked without duplicate stubs.
 - Parent-owned coordination mode is active when `.wily/coordination.yaml`
   exists. Done uses `claim_snapshot` fingerprints and reports repo-qualified
   changed files; JSON includes `active_mode`.
+- In parent-owned coordination mode, `--stub-drift` is rejected; use
+  `--add-scope` only when the parent task should adopt those repo-qualified
+  files.
 - In parent-owned coordination mode, `.wily/coordination.yaml` makes `done`
   compare current child repo dirty fingerprints against `claim_snapshot`.
 - Changed files are reported with repo-qualified scope such as
