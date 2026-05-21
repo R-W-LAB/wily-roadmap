@@ -106,6 +106,7 @@ def _configure(args: list[str]) -> int:
         token=values.get("--token", existing.token),
         machine_id=values.get("--machine-id", existing.machine_id),
         heartbeat_interval=int(values.get("--interval", str(existing.heartbeat_interval))),
+        task_authority=existing.task_authority,
     )
     save_config(paths.config_path, config)
     _common.emit_json(config.public_dict()) if "--json" in args else _common.emit_text(f"wily-agent config written: {paths.config_path}")
@@ -135,6 +136,7 @@ def _login(args: list[str]) -> int:
         token=str(result["token"]),
         machine_id=str(result.get("machine_id") or existing.machine_id),
         heartbeat_interval=existing.heartbeat_interval,
+        task_authority=existing.task_authority,
     )
     save_config(paths.config_path, config)
     _common.emit_json(config.public_dict()) if "--json" in args else _common.emit_text(f"wily-agent logged in: {config.machine_id}")

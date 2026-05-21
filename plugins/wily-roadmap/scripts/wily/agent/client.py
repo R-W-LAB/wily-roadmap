@@ -8,6 +8,7 @@ import json
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import quote
 
 from .config import AgentConfig
 
@@ -87,10 +88,58 @@ def publish_heartbeat(
     )
 
 
+def transition_task(
+    config: AgentConfig,
+    project_id: str,
+    task_id: str,
+    action: str,
+    payload: dict[str, Any],
+    timeout: float = 5.0,
+) -> dict[str, Any]:
+    if not config.task_authority_configured:
+        return {"sent": False, "reason": "Board task authority is not configured"}
+    return sent_result(
+        post_json(
+            _project_task_url(config, project_id, task_id, action),
+            payload,
+            token=config.token,
+            timeout=timeout,
+        )
+    )
+
+
+def list_project_tasks(config: AgentConfig, project_id: str, timeout: float = 5.0) -> dict[str, Any]:
+    if not config.task_authority_configured:
+        return {"sent": False, "reason": "Board task authority is not configured"}
+    url = config.board_url.rstrip("/") + f"/agent/projects/{_project_path(project_id)}/tasks"
+    return sent_result(get_json(url, token=config.token, timeout=timeout))
+
+
 def sent_result(result: dict[str, Any]) -> dict[str, Any]:
     if result.get("sent") is False:
         return result
     return {"sent": True, **result}
+
+
+def get_json(
+    url: str,
+    *,
+    token: str = "",
+    timeout: float = 5.0,
+) -> dict[str, Any]:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response_body = response.read().decode("utf-8")
+            data = json.loads(response_body) if response_body else {}
+            return {"status": response.status, **data}
+    except urllib.error.HTTPError as exc:
+        return {"sent": False, "status": exc.code, "reason": exc.read().decode("utf-8", errors="replace") or str(exc)}
+    except (OSError, urllib.error.URLError) as exc:
+        return {"sent": False, "reason": str(exc)}
 
 
 def post_json(
@@ -114,3 +163,12 @@ def post_json(
         return {"sent": False, "status": exc.code, "reason": exc.read().decode("utf-8", errors="replace") or str(exc)}
     except (OSError, urllib.error.URLError) as exc:
         return {"sent": False, "reason": str(exc)}
+
+
+def _project_task_url(config: AgentConfig, project_id: str, task_id: str, action: str) -> str:
+    return config.board_url.rstrip("/") + f"/agent/projects/{_project_path(project_id)}/tasks/{quote(task_id, safe='')}/{action}"
+
+
+def _project_path(project_id: str) -> str:
+    owner, _, repo = project_id.partition("/")
+    return f"{quote(owner, safe='')}/{quote(repo, safe='')}"

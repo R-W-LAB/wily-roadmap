@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .. import board_runtime
 from ..config import load_actors, load_tasks
 from ..coordination import resolve_project_context
 from ..models import Task, TaskStatus
@@ -36,7 +37,18 @@ def main(args: list[str]) -> int:
         return _common.EXIT_FAILURE
     root = context.paths.root
     paths = context.paths
-    _, tasks = load_tasks(paths)
+    project_title, tasks = load_tasks(paths)
+    board_config = board_runtime.project_config_for_root(root)
+    config_error = board_runtime.config_error(board_config)
+    if config_error:
+        _common.emit_error(config_error)
+        return _common.EXIT_FAILURE
+    if board_runtime.authority_enabled(board_config):
+        ok, message = board_runtime.refresh_tasks_from_board(paths, project_title, tasks, board_config)
+        if not ok:
+            _common.emit_error(message)
+            return _common.EXIT_FAILURE
+        _, tasks = load_tasks(paths)
     actor_id = None
     if mine:
         email, name = git_config_identity(root)

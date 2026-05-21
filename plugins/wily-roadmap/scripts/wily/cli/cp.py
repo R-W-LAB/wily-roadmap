@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import board_runtime
 from ..config import load_actors, load_tasks
 from ..models import Task
 from ..observation import git_config_identity, match_actor
 from ..paths import WilyPaths, WilyRootNotFound, find_wily_root, touch_wily
-from ..progress import CpEvent, append_event, append_event_once, parse_status_board
+from ..progress import CpEvent, append_event, append_event_once, parse_status_board, read_events
 from . import _common
 
 DESCRIPTION = "record task checkpoint progress"
@@ -66,11 +67,30 @@ def main(args: list[str]) -> int:
         event=event_or_import,  # type: ignore[arg-type]
         note=_common.extract_value(args, "--note"),
     )
+    board_config = board_runtime.project_config_for_root(root)
+    config_error = board_runtime.config_error(board_config)
+    if config_error:
+        _common.emit_error(config_error)
+        return _common.EXIT_FAILURE
     if event.event == "note":
-        append_event(paths, task_id, event)
         created = True
     else:
-        created = append_event_once(paths, task_id, event)
+        created = not any(existing.cp == event.cp and existing.event == event.event for existing in read_events(paths, task_id))
+    if board_runtime.authority_enabled(board_config) and created:
+        result = board_runtime.transition_task(
+            board_config,
+            board_config.repo,
+            task_id,
+            "cp",
+            board_runtime.cp_payload_after_event(paths, task_id, event),
+        )
+        if result.get("sent") is False:
+            _common.emit_error(board_runtime.board_failure_message(result))
+            return _common.EXIT_FAILURE
+    if event.event == "note":
+        append_event(paths, task_id, event)
+    elif created:
+        append_event(paths, task_id, event)
     touch_wily(paths)
     if as_json:
         _common.emit_json({"task_id": task_id, "event": event.__dict__, "created": created})
@@ -92,6 +112,28 @@ def _import_status(root: Path, paths: WilyPaths, task_id: str, value: str | None
     if dry_run:
         _common.emit_text(f"{task_id} cp import-status dry-run: {len(events)} event(s) from {source.relative_to(root) if source.is_relative_to(root) else source}")
         return _common.EXIT_OK
+    board_config = board_runtime.project_config_for_root(root)
+    config_error = board_runtime.config_error(board_config)
+    if config_error:
+        _common.emit_error(config_error)
+        return _common.EXIT_FAILURE
+    if board_runtime.authority_enabled(board_config):
+        existing_events = read_events(paths, task_id)
+        pending_events: list[CpEvent] = []
+        for event in events:
+            if event.event not in {"start", "done", "note", "cancel"}:
+                continue
+            result = board_runtime.transition_task(
+                board_config,
+                board_config.repo,
+                task_id,
+                "cp",
+                board_runtime.cp_payload_from_events([*existing_events, *pending_events, event], event),
+            )
+            if result.get("sent") is False:
+                _common.emit_error(board_runtime.board_failure_message(result))
+                return _common.EXIT_FAILURE
+            pending_events.append(event)
     created = 0
     for event in events:
         if append_event_once(paths, task_id, event):
