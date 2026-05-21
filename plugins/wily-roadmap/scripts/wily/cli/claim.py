@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import board_runtime
 from ..config import load_actors, load_tasks, save_tasks
 from ..coordination import ProjectContext, nested_repo_exclusions, resolve_project_context
 from ..models import Actor
@@ -79,6 +80,23 @@ def main(args: list[str]) -> int:
     except TransitionError as exc:
         _common.emit_error(str(exc))
         return _common.EXIT_TRANSITION
+    board_config = board_runtime.project_config_for_root(root)
+    config_error = board_runtime.config_error(board_config)
+    if config_error:
+        _common.emit_error(config_error)
+        return _common.EXIT_FAILURE
+    if board_runtime.authority_enabled(board_config):
+        result = board_runtime.transition_task(
+            board_config,
+            board_config.repo,
+            task_id,
+            "claim",
+            {"claim_sha": claim_sha, "at": now},
+        )
+        if result.get("sent") is False:
+            _common.emit_error(board_runtime.board_failure_message(result))
+            return _common.EXIT_FAILURE
+        updated = board_runtime.apply_runtime_response(updated, result)
     save_tasks(paths, project_title, [updated if item.id == task_id else item for item in tasks])
     init_progress(paths, task_id)
     touch_wily(paths)

@@ -27,6 +27,7 @@ class AgentConfig:
     token: str = ""
     machine_id: str = ""
     heartbeat_interval: int = 5
+    task_authority: bool = False
 
     @property
     def configured(self) -> bool:
@@ -40,6 +41,10 @@ class AgentConfig:
     def live_configured(self) -> bool:
         return bool(self.board_url and self.repo and self.actor and self.secret)
 
+    @property
+    def task_authority_configured(self) -> bool:
+        return bool(self.task_authority and self.board_url and self.repo and self.token)
+
     def public_dict(self) -> dict[str, Any]:
         return {
             "board_url": self.board_url,
@@ -49,6 +54,7 @@ class AgentConfig:
             "token_configured": bool(self.token),
             "machine_id": self.machine_id,
             "heartbeat_interval": self.heartbeat_interval,
+            "task_authority": self.task_authority,
             "configured": self.configured,
         }
 
@@ -74,6 +80,7 @@ def load_config(path: Path) -> AgentConfig:
         token=os.environ.get("WILY_AGENT_TOKEN", ""),
         machine_id=os.environ.get("WILY_AGENT_MACHINE_ID", ""),
         heartbeat_interval=_int_env("WILY_AGENT_HEARTBEAT_INTERVAL", 5),
+        task_authority=_bool_env("WILY_BOARD_TASK_AUTHORITY", False),
     )
     if not path.exists():
         return env_config
@@ -86,6 +93,7 @@ def load_config(path: Path) -> AgentConfig:
         token=str(data.get("token") or env_config.token),
         machine_id=str(data.get("machine_id") or env_config.machine_id),
         heartbeat_interval=int(data.get("heartbeat_interval") or env_config.heartbeat_interval),
+        task_authority=bool(data.get("task_authority", env_config.task_authority)),
     )
 
 
@@ -111,3 +119,10 @@ def _int_env(name: str, default: int) -> int:
         return int(os.environ.get(name, str(default)))
     except ValueError:
         return default
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
